@@ -433,6 +433,27 @@ function toCounts(tiles) {
   return c;
 }
 
+// 牌の枚数不整合検知用:赤5(0p/0s)や白ポッチ(K)も区別したままカウントする
+function countsRaw(tiles) {
+  const c = {};
+  tiles.forEach((t) => {
+    c[t] = (c[t] || 0) + 1;
+  });
+  return c;
+}
+const MASTER_TILE_COUNTS = countsRaw(buildWall());
+
+// 次に訪れる深夜3:00(ローカル時刻)を返す
+function next3AM() {
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 3, 0, 0, 0);
+  if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
+  return target;
+}
+function formatClock(date) {
+  return date.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function isAgariShape(counts, needSets, noSeq) {
   const keys = Object.keys(counts).filter((k) => counts[k] > 0);
   if (keys.length === 0) return needSets === 0;
@@ -701,6 +722,124 @@ export default function MahjongApp() {
     setLog((l) => [msg, ...l].slice(0, 60));
   }, []);
 
+  /* ------------------------- 異常検知・メンテナンス ------------------------- */
+  const [anomalies, setAnomalies] = useState([]);
+  const [maintenanceAt, setMaintenanceAt] = useState(null);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const maintenanceTimerRef = useRef(null);
+  const knownAnomalyKeysRef = useRef(new Set());
+
+  const applyMaintenancePatch = useCallback(() => {
+    setAnomalies((list) => list.map((a) => (a.status === "scheduled" ? { ...a, status: "patched" } : a)));
+    knownAnomalyKeysRef.current.clear();
+    maintenanceTimerRef.current = null;
+    setMaintenanceAt(null);
+    addLog("メンテナンス完了:検知した不具合の修正パッチを適用しました");
+    showSplash("パッチ適用完了");
+  }, [addLog, showSplash]);
+
+  const scheduleMaintenance = useCallback(() => {
+    if (maintenanceTimerRef.current) return;
+    const target = next3AM();
+    setMaintenanceAt(target);
+    maintenanceTimerRef.current = setTimeout(applyMaintenancePatch, target.getTime() - Date.now());
+  }, [applyMaintenancePatch]);
+
+  const reportAnomaly = useCallback(
+    (key, message, source) => {
+      setAnomalies((list) => {
+        if (list.some((a) => a.key === key && a.status !== "patched")) return list;
+        return [...list, { id: `${Date.now()}-${Math.random()}`, key, time: new Date().toISOString(), source, message, status: "scheduled" }];
+      });
+      scheduleMaintenance();
+    },
+    [scheduleMaintenance]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (maintenanceTimerRef.current) clearTimeout(maintenanceTimerRef.current);
+    };
+  }, []);
+
+  // 牌の枚数不整合・持ち点/チップの異常値を継続的に監視する
+  useEffect(() => {
+    if (phase === "title") return;
+    // ポン・大明槓で鳴かれた牌は捨て牌列にも表示仕様上残るため(誰から鳴いたかを示す向き変え表示のため)、
+    // 集計時は鳴かれた分を捨て牌側から差し引いて二重計上を防ぐ
+    const calledAway = {};
+    players.forEach((p) => {
+      p.melds.forEach((m) => {
+        if ((m.type === "pon" || m.type === "minkan") && m.from !== undefined && m.from !== null) {
+          calledAway[m.from] = calledAway[m.from] || {};
+          calledAway[m.from][m.tile] = (calledAway[m.from][m.tile] || 0) + 1;
+        }
+      });
+    });
+    const inPlay = [
+      ...wall,
+      ...deadWall,
+      ...players.flatMap((p, i) => {
+        const remaining = { ...(calledAway[i] || {}) };
+        const netDiscards = p.discards.filter((t) => {
+          const norm = normTile(t);
+          if (remaining[norm] > 0) {
+            remaining[norm]--;
+            return false;
+          }
+          return true;
+        });
+        return [
+          ...p.hand,
+          ...netDiscards,
+          ...p.flowers,
+          ...p.melds.flatMap((m) => Array(m.type.includes("kan") ? 4 : 3).fill(m.tile)),
+        ];
+      }),
+    ];
+    const counts = countsRaw(inPlay);
+    Object.keys(counts).forEach((code) => {
+      const max = MASTER_TILE_COUNTS[code] || 0;
+      const key = `tilecount-${code}`;
+      if (counts[code] > max && !knownAnomalyKeysRef.current.has(key)) {
+        knownAnomalyKeysRef.current.add(key);
+        const message = `牌の枚数不整合を検知しました:${tileText(code)}が${counts[code]}枚検出されました(上限${max}枚)`;
+        reportAnomaly(key, message, "auto");
+        addLog(`⚠ 異常検知: ${message}`);
+        showSplash("異常を検知しました");
+      }
+    });
+    players.forEach((p, i) => {
+      const key = `score-${i}`;
+      if ((!Number.isFinite(p.score) || p.score < 0) && !knownAnomalyKeysRef.current.has(key)) {
+        knownAnomalyKeysRef.current.add(key);
+        const message = `${SEATS[i]}の持ち点が異常値です(${p.score})`;
+        reportAnomaly(key, message, "auto");
+        addLog(`⚠ 異常検知: ${message}`);
+        showSplash("異常を検知しました");
+      }
+      const chipKey = `chips-${i}`;
+      if ((!Number.isFinite(p.chips) || p.chips < 0) && !knownAnomalyKeysRef.current.has(chipKey)) {
+        knownAnomalyKeysRef.current.add(chipKey);
+        const message = `${SEATS[i]}の祝儀チップが異常値です(${p.chips})`;
+        reportAnomaly(chipKey, message, "auto");
+        addLog(`⚠ 異常検知: ${message}`);
+        showSplash("異常を検知しました");
+      }
+    });
+  }, [players, wall, deadWall, phase, reportAnomaly, addLog, showSplash]);
+
+  function submitAnomalyReport() {
+    const text = reportText.trim();
+    if (!text) return;
+    reportAnomaly(`user-${Date.now()}`, text, "user");
+    addLog(`⚠ ユーザー報告: ${text}`);
+    setReportText("");
+    setShowReportModal(false);
+    showSplash("ご報告ありがとうございます");
+  }
+
   useEffect(() => {
     if (current !== 0 || phase !== "playing" || drewTile === null) return;
     if (riichiArmed || kanPrompt) return;
@@ -714,7 +853,7 @@ export default function MahjongApp() {
     } else if (kakanOpts.length > 0) {
       setKanPrompt({ type: "kakan", tile: kakanOpts[0] });
     } else if (me.riichi) {
-      const t = setTimeout(() => doDiscard(0, players[0].hand.length - 1, players), 500);
+      const t = setTimeout(() => doDiscard(0, players[0].hand.length - 1, players, false, wall, deadWall), 500);
       return () => clearTimeout(t);
     }
   }, [drewTile, current, phase]);
@@ -805,7 +944,7 @@ export default function MahjongApp() {
     newPs[who].hand = sortHandKeepLast(newPs[who].hand, tile);
     setPlayers(newPs);
     if (who !== 0) {
-      setTimeout(() => aiTurn(who, newPs, rest), 600);
+      setTimeout(() => aiTurn(who, newPs, rest, dw), 600);
     }
   }
 
@@ -878,10 +1017,10 @@ export default function MahjongApp() {
       setPlayers(np);
       setRiichiArmed(false);
       addLog("あなたが立直!");
-      doDiscard(0, idx, np, true);
+      doDiscard(0, idx, np, true, wall, deadWall);
       return;
     }
-    doDiscard(0, idx, players);
+    doDiscard(0, idx, players, false, wall, deadWall);
   }
 
   function humanTsumo() {
@@ -949,7 +1088,7 @@ export default function MahjongApp() {
     if (!kanPrompt) return;
     setKanPrompt(null);
     if (players[0].riichi) {
-      setTimeout(() => doDiscard(0, players[0].hand.length - 1, players), 300);
+      setTimeout(() => doDiscard(0, players[0].hand.length - 1, players, false, wall, deadWall), 300);
     }
   }
 
@@ -1004,7 +1143,7 @@ export default function MahjongApp() {
     setPlayers(np);
   }
 
-  function doDiscard(who, idx, ps, riichiDeclare) {
+  function doDiscard(who, idx, ps, riichiDeclare, wallArr, dw) {
     const tile = ps[who].hand[idx];
     const newHand = ps[who].hand.slice();
     newHand.splice(idx, 1);
@@ -1048,16 +1187,16 @@ export default function MahjongApp() {
         } else {
           const isYakuTile = ["P", "F", "C", "N"].includes(tile) || tile === seatWindOf(c, dealerIdx);
           if (isYakuTile && Math.random() < 0.7) {
-            doPon(c, tile, who, np);
+            doPon(c, tile, who, np, wallArr, dw);
             return;
           }
         }
       }
     }
-    advanceTurn(who, np);
+    advanceTurn(who, np, wallArr, dw);
   }
 
-  function doPon(who, tile, from, ps) {
+  function doPon(who, tile, from, ps, wallArr, dw) {
     const np = ps.map((p) => ({ ...p, ippatsuLive: false }));
     const p = { ...np[who] };
     let removed = 0;
@@ -1079,7 +1218,7 @@ export default function MahjongApp() {
     setCallChoices(null);
     setPhase("playing");
     if (who !== 0) {
-      setTimeout(() => aiDiscardAfterCall(who, np), 500);
+      setTimeout(() => aiDiscardAfterCall(who, np, wallArr, dw), 500);
     }
   }
 
@@ -1122,7 +1261,7 @@ export default function MahjongApp() {
       setPhase("playing");
       return;
     }
-    doPon(0, callChoices.tile, callChoices.from, players);
+    doPon(0, callChoices.tile, callChoices.from, players, wall, deadWall);
   }
   function humanCallKan() {
     if (countTilesUsed(players[0].hand, normTile(callChoices.tile)) < 3) {
@@ -1136,17 +1275,17 @@ export default function MahjongApp() {
   function humanSkipCall() {
     setCallChoices(null);
     setPhase("playing");
-    advanceTurn(callChoices.from, players);
+    advanceTurn(callChoices.from, players, wall, deadWall);
   }
 
-  function advanceTurn(who, ps) {
+  function advanceTurn(who, ps, wallArr, dw) {
     const next = (who + 1) % 3;
     setCurrent(next);
-    if (wall.length === 0) {
+    if (wallArr.length === 0) {
       handleDraw(ps);
       return;
     }
-    setTimeout(() => drawForCurrent(next, ps, wall, deadWall), 300);
+    setTimeout(() => drawForCurrent(next, ps, wallArr, dw), 300);
   }
 
   /* ------------------------- AI ------------------------- */
@@ -1205,7 +1344,7 @@ export default function MahjongApp() {
     return scored[0].i;
   }
 
-  function aiTurn(who, ps, wallArr) {
+  function aiTurn(who, ps, wallArr, dw) {
     const p = ps[who];
     const hand = p.hand;
     const res = tryResolveWin(who, ps, drewTile, true, p.melds);
@@ -1228,10 +1367,10 @@ export default function MahjongApp() {
         }
       }
     }
-    aiDiscardAfterCall(who, ps);
+    aiDiscardAfterCall(who, ps, wallArr, dw);
   }
 
-  function aiDiscardAfterCall(who, ps) {
+  function aiDiscardAfterCall(who, ps, wallArr, dw) {
     const p = ps[who];
     const hand = p.hand;
     let idx;
@@ -1254,7 +1393,7 @@ export default function MahjongApp() {
         isRiichiDeclare = true;
       }
     }
-    setTimeout(() => doDiscard(who, idx, nextPs, isRiichiDeclare), 400);
+    setTimeout(() => doDiscard(who, idx, nextPs, isRiichiDeclare, wallArr, dw), 400);
   }
 
   /* ------------------------- 和了処理(ドラ・チューリップ) ------------------------- */
@@ -1487,6 +1626,37 @@ export default function MahjongApp() {
   }
 
   /* ------------------------- UI ------------------------- */
+  const pendingAnomalyCount = anomalies.filter((a) => a.status === "scheduled").length;
+  const anomalyReportUI = (
+    <>
+      <button style={styles.anomalyButton} onClick={() => setShowReportModal(true)} title="異常報告">
+        ⚠ 異常報告{pendingAnomalyCount > 0 ? `(${pendingAnomalyCount})` : ""}
+      </button>
+      {showReportModal && (
+        <div style={styles.modalOverlay} onClick={() => { setShowReportModal(false); setReportText(""); }}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 15, marginBottom: 10 }}>異常箇所を報告してください。</div>
+            <textarea
+              value={reportText}
+              onChange={(e) => setReportText(e.target.value)}
+              placeholder="どこで、どんな異常が起きたか入力してください"
+              rows={4}
+              style={styles.reportTextarea}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }}>
+              <button style={styles.actBtn} onClick={submitAnomalyReport}>送信</button>
+              <button style={styles.skipBtn} onClick={() => { setShowReportModal(false); setReportText(""); }}>キャンセル</button>
+            </div>
+            {maintenanceAt && (
+              <div style={{ fontSize: 11, opacity: 0.7, marginTop: 10 }}>
+                次回メンテナンス予定: {formatClock(maintenanceAt)}(検知した不具合を修正)
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
   const you = players[0];
   const isMyTurn = current === 0 && phase === "playing";
   const expectedHandLen = 14 - 3 * you.melds.length;
@@ -1543,6 +1713,7 @@ export default function MahjongApp() {
           </button>
         </div>
         {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
+        {anomalyReportUI}
       </div>
     );
   }
@@ -1567,6 +1738,7 @@ export default function MahjongApp() {
             もう一度
           </button>
         </div>
+        {anomalyReportUI}
       </div>
     );
   }
@@ -1827,6 +1999,8 @@ export default function MahjongApp() {
           <div style={styles.splashText}>{splash.text}</div>
         </div>
       )}
+
+      {anomalyReportUI}
     </div>
   );
 }
@@ -1936,17 +2110,14 @@ function DiceIcon({ value, size = 16 }) {
   );
 }
 
-function RiverBlock({ player, who, wind, align, riichiIndex, isCurrent, compact, sideRotate = 0 }) {
+function RiverBlock({ player, who, wind, align, riichiIndex, isCurrent }) {
   const rows = chunkTiles(player.discards, 7);
   let idxCounter = -1;
-  const vertical = sideRotate !== 0;
   return (
     <div
       style={{
         ...styles.riverBlock,
         alignItems: align === "right" ? "flex-end" : "flex-start",
-        overflowX: vertical ? "auto" : "hidden",
-        overflowY: vertical ? "hidden" : "auto",
       }}
     >
       <div
@@ -1960,42 +2131,22 @@ function RiverBlock({ player, who, wind, align, riichiIndex, isCurrent, compact,
         <span style={{ fontWeight: 700 }}>{player.name}</span>
         {player.riichi && <span title="リーチ">🔴</span>}
         {isCurrent && <span title="手番">⌛</span>}
-        <span style={{ opacity: 0.8, marginLeft: vertical ? 0 : align === "right" ? 0 : "auto", marginRight: vertical ? 0 : align === "right" ? "auto" : 0 }}>🎫{player.chips}</span>
+        <span style={{ opacity: 0.8, marginLeft: align === "right" ? 0 : "auto", marginRight: align === "right" ? "auto" : 0 }}>🎫{player.chips}</span>
       </div>
       {player.melds.length > 0 && (
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 2, flexDirection: vertical ? "column" : align === "right" ? "row-reverse" : "row" }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 2, flexDirection: align === "right" ? "row-reverse" : "row" }}>
           {player.melds.map((m, i) => (
             <MeldGroup key={i} meld={m} who={who} size="sm" />
           ))}
         </div>
       )}
-      <div
-        style={{
-          ...styles.pondTiles,
-          flexDirection: vertical ? "row" : "column",
-          alignItems: vertical ? "flex-start" : align === "right" ? "flex-end" : "flex-start",
-        }}
-      >
+      <div style={styles.pondTiles}>
         {rows.map((row, r) => (
-          <div
-            key={r}
-            style={{
-              ...styles.pondTileRow,
-              flexDirection: vertical ? "column" : align === "right" ? "row-reverse" : "row",
-            }}
-          >
+          <div key={r} style={styles.pondTileRow}>
             {row.map((t, j) => {
               idxCounter++;
               const isRiichiTile = idxCounter === riichiIndex;
-              const deg = vertical ? (isRiichiTile ? sideRotate + 90 : sideRotate) : isRiichiTile ? 90 : 0;
-              return (
-                <MahjongTile
-                  key={j}
-                  tile={t}
-                  size="sm"
-                  rotateDeg={deg}
-                />
-              );
+              return <MahjongTile key={j} tile={t} size="sm" rotateDeg={isRiichiTile ? 90 : 0} />;
             })}
           </div>
         ))}
@@ -2087,14 +2238,14 @@ function TablePond({ players, dealerIdx, round, dice, current }) {
   return (
     <div style={styles.tableSurface}>
       <div style={styles.sideRiverCol}>
-        <RiverBlock player={players[2]} who={2} wind={seatWindOf(2, dealerIdx)} align="left" riichiIndex={players[2].riichiDiscardIndex} isCurrent={current === 2} sideRotate={90} />
+        <RiverBlock player={players[2]} who={2} wind={seatWindOf(2, dealerIdx)} align="left" riichiIndex={players[2].riichiDiscardIndex} isCurrent={current === 2} />
       </div>
       <div style={styles.centerColumn}>
         <div style={styles.centerWallPanel}>東{round}局</div>
         <RiverBlock player={players[0]} who={0} wind={seatWindOf(0, dealerIdx)} align="left" riichiIndex={players[0].riichiDiscardIndex} isCurrent={current === 0} />
       </div>
       <div style={styles.sideRiverCol}>
-        <RiverBlock player={players[1]} who={1} wind={seatWindOf(1, dealerIdx)} align="right" riichiIndex={players[1].riichiDiscardIndex} isCurrent={current === 1} sideRotate={-90} />
+        <RiverBlock player={players[1]} who={1} wind={seatWindOf(1, dealerIdx)} align="right" riichiIndex={players[1].riichiDiscardIndex} isCurrent={current === 1} />
       </div>
     </div>
   );
@@ -2233,6 +2384,18 @@ const styles = {
     padding: "6px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 0 12px #4fd6ff55",
   },
   skipBtn: { background: "rgba(255,255,255,0.08)", color: "#eaf3ff", border: "1px solid rgba(255,255,255,0.18)", padding: "6px 16px", borderRadius: 10, fontSize: 13, cursor: "pointer" },
+
+  anomalyButton: {
+    position: "fixed", top: 8, left: 8, zIndex: 300,
+    background: "rgba(30,12,12,0.88)", color: "#ffcf7a", border: "1px solid rgba(255,138,61,0.6)",
+    borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+    boxShadow: "0 2px 10px #0009",
+  },
+  reportTextarea: {
+    width: "100%", minWidth: 240, maxWidth: 320, borderRadius: 8, border: "1px solid rgba(79,214,255,0.3)",
+    background: "rgba(255,255,255,0.06)", color: "#eaf3ff", padding: 8, fontSize: 13,
+    fontFamily: "inherit", resize: "vertical", boxSizing: "border-box",
+  },
 
   modalOverlay: { position: "fixed", inset: 0, background: "#02040aa8", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 },
   splashOverlay: {
