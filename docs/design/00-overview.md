@@ -1,0 +1,17 @@
+# 設計ドキュメント インデックス
+
+三人麻雀アプリ開発の10ステップのうち、STEP1〜6の確定内容をここにまとめる。各ファイルは議論の過程ではなく**最終的に確定した仕様**を記載する。
+
+| STEP | ファイル | 内容 |
+|---|---|---|
+| 1 | [01-tech-stack.md](./01-tech-stack.md) | 技術選定（Flutter / Dart / Serverpod） |
+| 2 | [02-system-architecture.md](./02-system-architecture.md) | システム構成図 |
+| 3 | [03-database-design.md](./03-database-design.md) | DB設計 |
+| 4 | [04-communication-design.md](./04-communication-design.md) | 通信設計 |
+| 5 | [05-mahjong-rules-six-ka-six-pei-sanma.md](./05-mahjong-rules-six-ka-six-pei-sanma.md) | 麻雀ルール設計（SixKa6PeiSanmaルールセット） |
+| 6 | [06-directory-structure.md](./06-directory-structure.md) | ディレクトリ構成 |
+| 7〜10 | 未着手 | UI設計 / CPU思考アルゴリズム / オンライン設計 / 実装 |
+
+## 前提：複数ルールセット対応
+
+このアプリは「6華6北5等三麻（SixKa6PeiSanma）」を最初の1つとして、将来的に複数の特殊麻雀ルールを追加できる構成にする。`packages/mahjong_engine`内の`RulesetDefinition`抽象インターフェースに対して、ルールセットごとにプラグインとして実装を追加する（詳細は05を参照）。

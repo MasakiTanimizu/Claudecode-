@@ -1,0 +1,18 @@
+name: mahjong_engine
+description: >
+  Pure-Dart mahjong rules engine shared by the Flutter client and the
+  Serverpod server. No Flutter or Serverpod dependency — see STEP1/STEP2
+  of docs/design for the rationale (single source of truth for rules,
+  usable for offline CPU play and for authoritative online validation).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  meta: ^1.15.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

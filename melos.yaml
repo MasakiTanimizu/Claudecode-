@@ -1,0 +1,21 @@
+name: sanma_mahjong
+
+packages:
+  - packages/**
+  - apps/**
+  - server
+
+command:
+  bootstrap:
+    runPubGetInParallel: true
+
+scripts:
+  analyze:
+    run: melos exec -- dart analyze .
+    description: Run static analysis across all packages.
+
+  test:
+    run: melos exec -- dart test
+    description: Run unit tests across all packages that define them.
+    packageFilters:
+      dirExists: test
