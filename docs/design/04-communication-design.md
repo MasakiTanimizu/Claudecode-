@@ -4,11 +4,12 @@
 
 ## ランダムマッチ成立フロー
 
-1. `matchmaking.enqueue(ruleSettingsId)`をRPC呼び出し
-2. サーバーがRedisの待機キューに登録（同一ルール設定のプレイヤー同士でグルーピング）
+1. `matchmaking.enqueue(ruleSettingsId, difficulty)`をRPC呼び出し（`difficulty`は easy/medium/hard。STEP7の「対戦」で選ぶ唯一の入力で、レートはこれに紐づく固定値）
+2. サーバーがRedisの待機キューに登録（同一ルール設定・同一difficultyのプレイヤー同士でグルーピング）
 3. 3人揃った時点でroom・matchを作成し、`rule_settings.config`を`rule_config`へスナップショットコピー
 4. 各クライアントへ`MatchFound(matchId, seat, opponents)`をStream配信
 5. 各クライアントが対局用Streamを購読し、初回`MatchStateSnapshot`を受信して対局画面へ遷移
+6. **7秒以内に3人揃わなければ**、クライアントが`matchmaking.cancel`を呼び、空席をCPUで埋めた対局を`mode: online_random`のまま開始する（STEP7 FIG.10参照）。この対局も通常通り記録・`player_difficulty_stats`に反映される
 
 ## 友人戦フロー
 
