@@ -17,4 +17,26 @@ void main() {
 
     expect(find.text('北'), findsOneWidget);
   });
+
+  testWidgets('double-tap triggers onDiscard; a single tap does not', (tester) async {
+    var discarded = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TileView(NumberTile(NumberSuit.pin, 3), onDiscard: () => discarded = true),
+      ),
+    );
+
+    await tester.tap(find.byType(TileView));
+    await tester.pump();
+    expect(discarded, isFalse);
+    // Let the single tap's double-tap window fully expire so it can't be
+    // mistaken for the first half of the double-tap sequence below.
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.tap(find.byType(TileView));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byType(TileView));
+    await tester.pump();
+    expect(discarded, isTrue);
+  });
 }

@@ -30,4 +30,70 @@ void main() {
     expect(find.textContaining('手番: プレイヤー1'), findsOneWidget);
     expect(find.textContaining('プレイヤー0（親）'), findsOneWidget);
   });
+
+  testWidgets('the draw button lets the viewer draw on their own turn', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(9), sou(9), man(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('ツモ'), findsOneWidget);
+    await tester.tap(find.text('ツモ'));
+    await tester.pump();
+
+    expect(state.phase, TurnPhase.awaitingDiscard);
+    expect(state.hands[0].concealedTiles, hasLength(14));
+  });
+
+  testWidgets('double-tapping a tile discards it, then the CPUs play their turns', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(9), sou(9), man(9), pin(2), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+    state.drawForCurrentPlayer(); // the viewer has already drawn 9p.
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    await tester.tap(find.text('9p'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('9p'));
+    await tester.pump();
+
+    expect(state.currentPlayerIndex, 0); // back to the viewer after CPUs 1 and 2 acted.
+    expect(state.discardPiles[1], hasLength(1));
+    expect(state.discardPiles[2], hasLength(1));
+  });
+
+  testWidgets('the tsumo button appears and ends the round on a winning hand', (tester) async {
+    final tenpaiHand = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      tenpaiHand,
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('ツモ'));
+    await tester.pump();
+
+    expect(find.text('和了'), findsOneWidget);
+    await tester.tap(find.text('和了'));
+    await tester.pump();
+
+    expect(state.isOver, isTrue);
+    expect(find.textContaining('ツモ和了'), findsOneWidget);
+  });
 }

@@ -24,4 +24,26 @@ void main() {
 
     expect(find.byType(TileView), findsNWidgets(6)); // 3 concealed + 3 meld tiles.
   });
+
+  testWidgets('double-tapping a concealed tile calls onDiscard with that tile', (tester) async {
+    final target = NumberTile(NumberSuit.pin, 2);
+    Tile? discarded;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HandView(
+          concealedTiles: [NumberTile(NumberSuit.pin, 1), target],
+          melds: const [],
+          onDiscard: (tile) => discarded = tile,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('2p'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('2p'));
+    await tester.pump();
+
+    expect(discarded, target);
+  });
 }
