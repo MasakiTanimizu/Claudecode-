@@ -8,3 +8,4 @@ export 'src/core/meld.dart';
 export 'src/core/tile.dart';
 export 'src/core/tile_set.dart';
 export 'src/core/wall.dart';
+export 'src/engine/shanten.dart';
