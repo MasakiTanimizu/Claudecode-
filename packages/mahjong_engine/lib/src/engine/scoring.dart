@@ -11,12 +11,19 @@
 /// opponents pay 1,000 even though the underlying dealer/non-dealer rates
 /// differ, because both round up to the same 1,000 floor.
 ///
-/// Scoped to the closed-form yaku from `yaku.dart` (国士無双 and the 七対子
-/// variants), since those are the only yaku detectable so far. Standard-hand
-/// scoring (fu from wait/meld composition, multi-yaku stacking) is deferred
-/// alongside the standard-hand shanten algorithm.
+/// Covers the closed-form yaku from `yaku.dart` (国士無双, 七対子 variants)
+/// and the shape-based standard-hand yaku from `standard_yaku.dart`. Fu for
+/// a standard hand only covers what's decidable without a winning-tile/wait
+/// context: base fu, menzen-ron/tsumo fu, per-meld fu, and a dragon-pair
+/// bonus — wait-shape fu (kanchan/penchan/tanki +2, and the "ron on a
+/// shanpon wait scores the completed triplet as open" exception) needs a
+/// `GameContext` this layer doesn't have yet, same scope boundary as
+/// `standard_yaku.dart` itself.
 library;
 
+import '../core/hand.dart';
+import '../core/tile.dart';
+import 'standard_yaku.dart';
 import 'yaku.dart';
 
 /// What each opponent pays for a single win.
@@ -118,6 +125,24 @@ WinPoints _pointsFromBase(int base, {required bool winnerIsDealer}) {
   );
 }
 
+WinPoints _pointsForHanFu(int han, int fu, {required bool winnerIsDealer}) {
+  if (han <= 3) {
+    final row = _fixedLowHanTable[han]!;
+    return winnerIsDealer
+        ? WinPoints(
+            ronPayment: row.dealerRon,
+            tsumoDoubleShare: row.dealerTsumoDouble,
+            tsumoSingleShare: row.dealerTsumoDouble,
+          )
+        : WinPoints(
+            ronPayment: row.nonDealerRon,
+            tsumoDoubleShare: row.nonDealerTsumoDouble,
+            tsumoSingleShare: row.nonDealerTsumoSingle,
+          );
+  }
+  return _pointsFromBase(_baseFor(han, fu), winnerIsDealer: winnerIsDealer);
+}
+
 /// Points for a win made up entirely of [yaku] (STEP5 closed-form yaku
 /// only — see file doc comment). Throws [ArgumentError] if [yaku] isn't one
 /// of the combinations this ruleset can actually complete on
@@ -141,20 +166,78 @@ WinPoints calculateClosedFormWinPoints({
       ),
   };
 
-  if (han <= 3) {
-    final row = _fixedLowHanTable[han]!;
-    return winnerIsDealer
-        ? WinPoints(
-            ronPayment: row.dealerRon,
-            tsumoDoubleShare: row.dealerTsumoDouble,
-            tsumoSingleShare: row.dealerTsumoDouble,
-          )
-        : WinPoints(
-            ronPayment: row.nonDealerRon,
-            tsumoDoubleShare: row.nonDealerTsumoDouble,
-            tsumoSingleShare: row.nonDealerTsumoSingle,
-          );
+  return _pointsForHanFu(han, 25, winnerIsDealer: winnerIsDealer);
+}
+
+/// How a hand was completed — affects the menzen-ron fu bonus and the tsumo
+/// fu bonus (STEP5「点数計算」reuses the standard fu table).
+enum WinMethod { ron, tsumo }
+
+/// Fu for [decomposition], excluding wait-shape fu (see file doc comment).
+/// Rounds up to the nearest 10, matching standard fu-calculation practice.
+int calculateStandardFu({
+  required StandardDecomposition decomposition,
+  required bool isMenzen,
+  required WinMethod method,
+}) {
+  var fu = 20;
+  if (isMenzen && method == WinMethod.ron) fu += 10;
+  if (method == WinMethod.tsumo) fu += 2;
+
+  for (final group in decomposition.melds.whereType<SetGroup>()) {
+    final honorOrTerminal = isHonorKind(group.kind) || isTerminalKind(group.kind);
+    final closedTripletFu = honorOrTerminal ? 8 : 4;
+    final groupFu = group.tileCount == 4 ? closedTripletFu * 4 : closedTripletFu;
+    fu += group.isOpen ? groupFu ~/ 2 : groupFu;
   }
 
-  return _pointsFromBase(_baseFor(han, 25), winnerIsDealer: winnerIsDealer);
+  if (decomposition.pair.kind is Dragon) fu += 2;
+
+  return ((fu + 9) ~/ 10) * 10;
+}
+
+/// Points for [hand] as a standard (4 melds + pair) win. Throws
+/// [ArgumentError] if it doesn't complete any detectable standard yaku
+/// (including the case where it only completes as 国士無双/七対子 — use
+/// [calculateClosedFormWinPoints] for those, or [calculateWinPoints] to
+/// try both automatically).
+///
+/// Simultaneous 役満 are assumed to stack (each multiplies the 8000 base),
+/// matching common practice — STEP5 doesn't say either way.
+WinPoints calculateStandardWinPoints({
+  required Hand hand,
+  required bool winnerIsDealer,
+  required WinMethod method,
+}) {
+  final result = selectBestStandardHand(hand);
+  if (result == null || result.yaku.isEmpty) {
+    throw ArgumentError.value(hand, 'hand', 'does not complete any detectable standard yaku');
+  }
+
+  final isYakuman = result.yaku.any((y) => hanValueOf(y, isMenzen: hand.isMenzen) >= 13);
+  if (isYakuman) {
+    return _pointsFromBase(8000 * result.yaku.length, winnerIsDealer: winnerIsDealer);
+  }
+
+  final han = result.yaku.fold(0, (sum, y) => sum + hanValueOf(y, isMenzen: hand.isMenzen));
+  final fu = calculateStandardFu(
+    decomposition: result.decomposition,
+    isMenzen: hand.isMenzen,
+    method: method,
+  );
+  return _pointsForHanFu(han, fu, winnerIsDealer: winnerIsDealer);
+}
+
+/// Points for [hand], trying 国士無双/七対子 first and falling back to a
+/// standard-hand decomposition. Throws [ArgumentError] if neither applies.
+WinPoints calculateWinPoints({
+  required Hand hand,
+  required bool winnerIsDealer,
+  required WinMethod method,
+}) {
+  final closedForm = detectClosedFormYaku(hand);
+  if (closedForm.isNotEmpty) {
+    return calculateClosedFormWinPoints(yaku: closedForm, winnerIsDealer: winnerIsDealer);
+  }
+  return calculateStandardWinPoints(hand: hand, winnerIsDealer: winnerIsDealer, method: method);
 }

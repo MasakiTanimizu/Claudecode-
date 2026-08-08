@@ -72,10 +72,10 @@ enum StandardYaku {
   tsuiisou,
 }
 
-bool _isHonorKind(Object kind) => kind is Wind || kind is Dragon;
+bool isHonorKind(Object kind) => kind is Wind || kind is Dragon;
 
-bool _isTerminalKind(Object kind) {
-  if (_isHonorKind(kind)) return false;
+bool isTerminalKind(Object kind) {
+  if (isHonorKind(kind)) return false;
   final (_, rank) = kind as (NumberSuit, int);
   return rank == 1 || rank == 9;
 }
@@ -240,7 +240,7 @@ bool _chantaOk(Iterable<Object> allKinds, Iterable<SequenceGroup> sequences) {
     if (s.start != 1 && s.start != 7) return false;
   }
   for (final kind in allKinds) {
-    if (!(_isTerminalKind(kind) || _isHonorKind(kind))) return false;
+    if (!(isTerminalKind(kind) || isHonorKind(kind))) return false;
   }
   return true;
 }
@@ -250,13 +250,13 @@ bool _junchanOk(Iterable<Object> allKinds, Iterable<SequenceGroup> sequences) {
     if (s.start != 1 && s.start != 7) return false;
   }
   for (final kind in allKinds) {
-    if (_isHonorKind(kind) || !_isTerminalKind(kind)) return false;
+    if (isHonorKind(kind) || !isTerminalKind(kind)) return false;
   }
   return true;
 }
 
 bool _isSimpleKind(Object kind) {
-  if (_isHonorKind(kind)) return false;
+  if (isHonorKind(kind)) return false;
   final (_, rank) = kind as (NumberSuit, int);
   return rank != 1 && rank != 9;
 }
@@ -271,10 +271,10 @@ List<StandardYaku> _evaluate(Hand hand, StandardDecomposition decomposition) {
   final concealedSetCount = sets.where((s) => !s.isOpen).length;
   final kantsuCount = hand.melds.where((m) => m.kind == MeldKind.kantsu).length;
 
-  final allHonor = sequences.isEmpty && allKinds.every(_isHonorKind);
-  final allTerminalNoHonor = sequences.isEmpty && allKinds.every(_isTerminalKind);
+  final allHonor = sequences.isEmpty && allKinds.every(isHonorKind);
+  final allTerminalNoHonor = sequences.isEmpty && allKinds.every(isTerminalKind);
   final allTerminalOrHonor =
-      sequences.isEmpty && allKinds.every((k) => _isTerminalKind(k) || _isHonorKind(k));
+      sequences.isEmpty && allKinds.every((k) => isTerminalKind(k) || isHonorKind(k));
 
   final yakuman = <StandardYaku>[];
   if (dragonSetKinds.length == 3) yakuman.add(StandardYaku.daisangen);
@@ -327,7 +327,7 @@ List<StandardYaku> _evaluate(Hand hand, StandardDecomposition decomposition) {
   final numberSuitsUsed = <NumberSuit>{};
   var hasHonorGroup = false;
   for (final kind in allKinds) {
-    if (_isHonorKind(kind)) {
+    if (isHonorKind(kind)) {
       hasHonorGroup = true;
     } else {
       numberSuitsUsed.add((kind as (NumberSuit, int)).$1);
@@ -343,7 +343,10 @@ List<StandardYaku> _evaluate(Hand hand, StandardDecomposition decomposition) {
   return result;
 }
 
-int _hanValue(StandardYaku yaku, {required bool isMenzen}) => switch (yaku) {
+/// Han value of a single [StandardYaku]. Public so `scoring.dart` can total
+/// up the han for a decomposition it already has in hand (from
+/// [selectBestStandardHand]) without re-deriving it.
+int hanValueOf(StandardYaku yaku, {required bool isMenzen}) => switch (yaku) {
       StandardYaku.tanyao => 1,
       StandardYaku.yakuhaiWhite => 1,
       StandardYaku.yakuhaiGreen => 1,
@@ -365,23 +368,31 @@ int _hanValue(StandardYaku yaku, {required bool isMenzen}) => switch (yaku) {
       StandardYaku.tsuiisou => 13,
     };
 
-/// The best (highest-han) shape-based yaku set [hand] completes as a
-/// standard hand, or an empty list if it doesn't complete this shape.
-/// A hand with more than one valid decomposition (e.g. an ambiguous
-/// toitoi-or-sequences shape) is scored using whichever reading wins more.
-List<StandardYaku> detectStandardYaku(Hand hand) {
-  final decompositions = decomposeStandardHand(hand);
-  if (decompositions.isEmpty) return const [];
+/// The yaku set and the decomposition that produced it, for whichever
+/// reading of [hand] scores highest — or `null` if it doesn't complete a
+/// standard shape at all. `scoring.dart` needs the decomposition itself
+/// (not just the yaku) to compute fu.
+typedef StandardHandResult = ({List<StandardYaku> yaku, StandardDecomposition decomposition});
 
-  var best = const <StandardYaku>[];
+StandardHandResult? selectBestStandardHand(Hand hand) {
+  final decompositions = decomposeStandardHand(hand);
+  if (decompositions.isEmpty) return null;
+
+  StandardHandResult? best;
   var bestHan = -1;
   for (final decomposition in decompositions) {
     final yaku = _evaluate(hand, decomposition);
-    final han = yaku.fold(0, (sum, y) => sum + _hanValue(y, isMenzen: hand.isMenzen));
+    final han = yaku.fold(0, (sum, y) => sum + hanValueOf(y, isMenzen: hand.isMenzen));
     if (han > bestHan) {
       bestHan = han;
-      best = yaku;
+      best = (yaku: yaku, decomposition: decomposition);
     }
   }
   return best;
 }
+
+/// The best (highest-han) shape-based yaku set [hand] completes as a
+/// standard hand, or an empty list if it doesn't complete this shape.
+/// A hand with more than one valid decomposition (e.g. an ambiguous
+/// toitoi-or-sequences shape) is scored using whichever reading wins more.
+List<StandardYaku> detectStandardYaku(Hand hand) => selectBestStandardHand(hand)?.yaku ?? const [];
