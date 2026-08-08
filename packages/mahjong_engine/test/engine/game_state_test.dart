@@ -89,7 +89,7 @@ void main() {
 
     test('declareTsumo throws when the hand is not actually complete', () {
       final hands = List.generate(3, (_) => Hand(concealedTiles: filler(pin, 3, 13)));
-      final wall = Wall([man(5), pin(2), pin(2)]);
+      final wall = Wall([man(9), pin(2), pin(2)]);
       final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
       state.drawForCurrentPlayer();
@@ -151,7 +151,7 @@ void main() {
       final hands = [
         farHand,
         Hand(concealedTiles: filler(sou, 3, 13)),
-        Hand(concealedTiles: filler(man, 5, 13)),
+        Hand(concealedTiles: filler(man, 9, 13)),
       ];
       final wall = Wall([pin(2), pin(5), pin(5)]);
       final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
