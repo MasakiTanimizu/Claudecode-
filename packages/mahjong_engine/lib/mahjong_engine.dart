@@ -11,4 +11,5 @@ export 'src/core/wall.dart';
 export 'src/engine/scoring.dart';
 export 'src/engine/shanten.dart';
 export 'src/engine/standard_shanten.dart';
+export 'src/engine/standard_yaku.dart';
 export 'src/engine/yaku.dart';
