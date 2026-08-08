@@ -21,3 +21,7 @@ export 'src/engine/shanten.dart';
 export 'src/engine/standard_shanten.dart';
 export 'src/engine/standard_yaku.dart';
 export 'src/engine/yaku.dart';
+export 'src/rulesets/rule_toggle.dart';
+export 'src/rulesets/ruleset_definition.dart';
+export 'src/rulesets/ruleset_registry.dart';
+export 'src/rulesets/six_ka_six_pei_sanma/six_ka_six_pei_sanma_ruleset.dart';
