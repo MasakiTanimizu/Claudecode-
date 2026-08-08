@@ -36,7 +36,7 @@
 祝儀清算時のレート値(0.5/100/200)は`difficulty`から導出する（別列は持たない）。オンライン対戦でマッチング不成立によりCPUが空席を埋めた場合も`mode`は`online_random`のまま、該当`match_players.user_id`がnullになるだけで、この対局も通常通り記録・`player_difficulty_stats`に反映される。
 
 ### match_players — 着席と結果
-`match_id`(FK) / `seat` / `user_id`(nullable, null=CPU) / `cpu_difficulty` / `final_score` / `final_rank`（複合PK: match_id, seat）
+`match_id`(FK) / `seat` / `user_id`(nullable, null=CPU) / `cpu_difficulty` / `final_score` / `final_rank` / `left_at_seq`(int, nullable — 再接続の猶予切れで恒久的にCPU代打ちへ切り替わった時点のmatch_events.seq_no。STEP9参照)（複合PK: match_id, seat）
 
 ### match_events — 着手イベント（リプレイの実体）
 `match_id`(FK) / `seq_no` / `event_type`(draw, discard, call, riichi, tsumo, ron, kan, exhaustive_draw 等) / `payload`(jsonb) / `created_at`（複合PK: match_id, seq_no）

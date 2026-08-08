@@ -12,7 +12,8 @@
 | 6 | [06-directory-structure.md](./06-directory-structure.md) | ディレクトリ構成 |
 | 7 | [07-ui-design.md](./07-ui-design.md) | UI設計 |
 | 8 | [08-cpu-ai.md](./08-cpu-ai.md) | CPU思考アルゴリズム |
-| 9〜10 | 未着手 | オンライン設計 / 実装 |
+| 9 | [09-online-design.md](./09-online-design.md) | オンライン設計 |
+| 10 | 未着手 | 実装 |
 | 追補 | [addendum-anomaly-detection-pipeline.md](./addendum-anomaly-detection-pipeline.md) | 異常検知ボタン・Claude Codeによる自動バグ判定パイプライン（STEP横断） |
 
 ## 段位の廃止とレートの再定義
