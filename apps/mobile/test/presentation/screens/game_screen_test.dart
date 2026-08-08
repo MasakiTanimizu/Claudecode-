@@ -70,6 +70,9 @@ void main() {
     expect(state.currentPlayerIndex, 0); // back to the viewer after CPUs 1 and 2 acted.
     expect(state.discardPiles[1], hasLength(1));
     expect(state.discardPiles[2], hasLength(1));
+    // Flush the gesture recognizer's own internal timer so the test
+    // framework doesn't see it as still pending at teardown.
+    await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('the tsumo button appears and ends the round on a winning hand', (tester) async {

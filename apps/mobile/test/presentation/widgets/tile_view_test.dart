@@ -38,5 +38,8 @@ void main() {
     await tester.tap(find.byType(TileView));
     await tester.pump();
     expect(discarded, isTrue);
+    // Flush the gesture recognizer's own internal timer so the test
+    // framework doesn't see it as still pending at teardown.
+    await tester.pump(const Duration(seconds: 1));
   });
 }
