@@ -175,3 +175,18 @@ class HanaTile extends Tile {
   @override
   String toString() => 'HanaTile($label)';
 }
+
+/// Groups tiles by everything except cosmetic markers (red/blue dora color,
+/// haku-pocchi). Two tiles with the same [tileKind] are interchangeable for
+/// forming a pair/kotsu/kantsu — e.g. a plain 5p and a red 5p are "the same
+/// tile" for meld-building even though [Tile.==] treats them as distinct
+/// (STEP5: marks are cosmetic/scoring properties, not a different tile type).
+extension TileKind on Tile {
+  Object get tileKind => switch (this) {
+        NumberTile t => (t.suit, t.number),
+        WindTile t => t.wind,
+        DragonTile t => t.dragon,
+        KitaTile _ => KitaTile,
+        HanaTile t => t.kind,
+      };
+}

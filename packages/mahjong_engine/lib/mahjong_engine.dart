@@ -3,5 +3,7 @@
 /// dependency here — see docs/design/01-tech-stack.md for why.
 library;
 
+export 'src/core/hand.dart';
+export 'src/core/meld.dart';
 export 'src/core/tile.dart';
 export 'src/core/tile_set.dart';
