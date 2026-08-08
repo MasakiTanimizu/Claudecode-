@@ -1,6 +1,6 @@
 # 設計ドキュメント インデックス
 
-三人麻雀アプリ開発の10ステップのうち、STEP1〜7の確定内容をここにまとめる。各ファイルは議論の過程ではなく**最終的に確定した仕様**を記載する。
+三人麻雀アプリ開発の10ステップのうち、STEP1〜8の確定内容をここにまとめる。各ファイルは議論の過程ではなく**最終的に確定した仕様**を記載する。
 
 | STEP | ファイル | 内容 |
 |---|---|---|
@@ -11,8 +11,9 @@
 | 5 | [05-mahjong-rules-six-ka-six-pei-sanma.md](./05-mahjong-rules-six-ka-six-pei-sanma.md) | 麻雀ルール設計（SixKa6PeiSanmaルールセット） |
 | 6 | [06-directory-structure.md](./06-directory-structure.md) | ディレクトリ構成 |
 | 7 | [07-ui-design.md](./07-ui-design.md) | UI設計 |
-| 追補 | [08-anomaly-detection-pipeline.md](./08-anomaly-detection-pipeline.md) | 異常検知ボタン・Claude Codeによる自動バグ判定パイプライン |
-| 8〜10 | 未着手 | CPU思考アルゴリズム / オンライン設計 / 実装 |
+| 8 | [08-cpu-ai.md](./08-cpu-ai.md) | CPU思考アルゴリズム |
+| 9〜10 | 未着手 | オンライン設計 / 実装 |
+| 追補 | [addendum-anomaly-detection-pipeline.md](./addendum-anomaly-detection-pipeline.md) | 異常検知ボタン・Claude Codeによる自動バグ判定パイプライン（STEP横断） |
 
 ## 段位の廃止とレートの再定義
 
