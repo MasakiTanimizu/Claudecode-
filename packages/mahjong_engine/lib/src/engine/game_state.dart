@@ -1,13 +1,17 @@
 /// Turn-by-turn state machine for a single 局 (hand/round) (STEP10 実装).
 ///
-/// Scoped to the core draw → (riichi/tsumo) → discard loop, ron on another
-/// player's discard, and exhaustive draw (流局). Calls (ポン・カン — this
-/// ruleset doesn't use チー, docs/design/05「鳴き・後付け」) are NOT handled
-/// here — they interrupt normal turn order in a way that needs its own
-/// dedicated slice (a call jumps straight to the caller's discard, skipping
-/// players in between). Every method here assumes no call is pending; a
-/// future call-handling slice will need to extend the phase model rather
-/// than bolt onto this one.
+/// Scoped to the core draw → (riichi/tsumo) → discard loop, pon/ron on
+/// another player's discard, and exhaustive draw (流局). Kan (暗槓・大明槓・
+/// 加槓 — this ruleset doesn't use チー, docs/design/05「鳴き・後付け」) is NOT
+/// handled here yet: it needs a replacement draw and an extra dora reveal
+/// (STEP5「崖」/「ドラ表示」), which is a bigger addition than pon's plain
+/// meld-and-discard. Deferred to its own slice.
+///
+/// Callers are responsible for call priority: this class exposes
+/// [canDeclareRon]/[canDeclarePon] as independent per-player queries and
+/// does not arbitrate between them — real mahjong gives ron priority over
+/// pon on the same discard, so check every player's ron eligibility before
+/// acting on a pon.
 ///
 /// A hand is judged winnable using the same yaku detectors as the rest of
 /// `engine/` (`yaku.dart`, `standard_yaku.dart`), with one addition: a
@@ -19,6 +23,7 @@ library;
 import 'dart:math';
 
 import '../core/hand.dart';
+import '../core/meld.dart';
 import '../core/tile.dart';
 import '../core/wall.dart';
 import 'shanten.dart';
@@ -178,12 +183,17 @@ class GameState {
     _finishDiscard(tile);
   }
 
+  /// The player who made the discard currently open for ron/pon — only
+  /// meaningful while [phase] is [TurnPhase.awaitingDraw], i.e. right after
+  /// a discard and before the next player has drawn.
+  int get _lastDiscarderIndex => (currentPlayerIndex - 1 + hands.length) % hands.length;
+
   /// Whether [playerIndex] could declare ron on the tile just discarded.
   /// Only meaningful right after a discard (phase is [TurnPhase.awaitingDraw]
   /// for the *next* player) and before that next player draws.
   bool canDeclareRon(int playerIndex) {
     if (phase != TurnPhase.awaitingDraw) return false;
-    final lastDiscarder = (currentPlayerIndex - 1 + hands.length) % hands.length;
+    final lastDiscarder = _lastDiscarderIndex;
     if (playerIndex == lastDiscarder) return false;
     final pile = discardPiles[lastDiscarder];
     if (pile.isEmpty) return false;
@@ -204,12 +214,53 @@ class GameState {
     if (!canDeclareRon(playerIndex)) {
       throw StateError('player $playerIndex cannot declare ron right now');
     }
-    final lastDiscarder = (currentPlayerIndex - 1 + hands.length) % hands.length;
+    final lastDiscarder = _lastDiscarderIndex;
     phase = TurnPhase.roundOver;
     result = RoundResult(
       reason: RoundOverReason.ron,
       winnerIndex: playerIndex,
       dealtInIndex: lastDiscarder,
     );
+  }
+
+  /// Whether [playerIndex] holds a matching pair and could pon the tile
+  /// just discarded. Same reaction window as [canDeclareRon]. A player who
+  /// has already declared riichi can never pon — their hand is locked.
+  bool canDeclarePon(int playerIndex) {
+    if (phase != TurnPhase.awaitingDraw) return false;
+    if (riichiDeclared.contains(playerIndex)) return false;
+    final lastDiscarder = _lastDiscarderIndex;
+    if (playerIndex == lastDiscarder) return false;
+    final pile = discardPiles[lastDiscarder];
+    if (pile.isEmpty) return false;
+
+    final tileKind = pile.last.tileKind;
+    final matching = hands[playerIndex].concealedTiles.where((t) => t.tileKind == tileKind).length;
+    return matching >= 2;
+  }
+
+  /// [playerIndex] declares pon on the tile just discarded, forming an open
+  /// triplet from it plus two matching concealed tiles. Turn order jumps
+  /// straight to [playerIndex], who now owes an immediate discard (no
+  /// draw) — this method doesn't choose which tile.
+  void declarePon(int playerIndex) {
+    if (!canDeclarePon(playerIndex)) {
+      throw StateError('player $playerIndex cannot pon right now');
+    }
+    final calledTile = discardPiles[_lastDiscarderIndex].last;
+    final hand = hands[playerIndex];
+    final concealed = List<Tile>.of(hand.concealedTiles);
+    final claimed = <Tile>[];
+    for (var i = concealed.length - 1; i >= 0 && claimed.length < 2; i--) {
+      if (concealed[i].tileKind == calledTile.tileKind) {
+        claimed.add(concealed.removeAt(i));
+      }
+    }
+    final meld = Meld.kotsu([...claimed, calledTile], source: CallSource.pon);
+
+    hands[playerIndex] = Hand(concealedTiles: concealed, melds: [...hand.melds, meld]);
+    currentPlayerIndex = playerIndex;
+    _drawnTile = null;
+    phase = TurnPhase.awaitingDiscard;
   }
 }

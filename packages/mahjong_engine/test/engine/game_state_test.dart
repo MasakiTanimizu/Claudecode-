@@ -189,6 +189,54 @@ void main() {
     });
   });
 
+  group('GameState pon', () {
+    test('another player can pon the tile just discarded, jumping the turn order', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: [pin(5), pin(5), ...filler(sou, 3, 11)]),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([pin(5), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      state.drawForCurrentPlayer(); // p0 draws pin(5)
+      state.discard(pin(5));
+
+      expect(state.canDeclarePon(0), isFalse); // can't pon your own discard.
+      expect(state.canDeclarePon(1), isTrue);
+      expect(state.canDeclarePon(2), isFalse);
+
+      state.declarePon(1);
+      expect(state.currentPlayerIndex, 1);
+      expect(state.phase, TurnPhase.awaitingDiscard);
+      expect(state.hands[1].concealedTiles, hasLength(11));
+      expect(state.hands[1].melds, hasLength(1));
+      expect(state.hands[1].melds.single.isOpen, isTrue);
+      expect(state.hands[1].melds.single.kind, MeldKind.kotsu);
+
+      // The caller now owes a discard; turn order continues from them.
+      state.discard(sou(3));
+      expect(state.currentPlayerIndex, 2);
+    });
+
+    test('a riichi hand can never pon', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: [pin(5), pin(5), ...filler(sou, 3, 11)]),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([pin(5), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+      state.riichiDeclared.add(1);
+
+      state.drawForCurrentPlayer();
+      state.discard(pin(5));
+
+      expect(state.canDeclarePon(1), isFalse);
+      expect(() => state.declarePon(1), throwsStateError);
+    });
+  });
+
   group('GameState.deal', () {
     test('deals a fresh, ready-to-play round', () {
       final fullSet = buildFullTileSet(markPreset: DoraMarkPreset.allRed);
