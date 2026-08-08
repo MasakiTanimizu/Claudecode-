@@ -8,6 +8,7 @@ export 'src/core/meld.dart';
 export 'src/core/tile.dart';
 export 'src/core/tile_set.dart';
 export 'src/core/wall.dart';
+export 'src/engine/game_state.dart';
 export 'src/engine/scoring.dart';
 export 'src/engine/shanten.dart';
 export 'src/engine/standard_shanten.dart';
