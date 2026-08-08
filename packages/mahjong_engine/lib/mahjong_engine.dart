@@ -3,7 +3,11 @@
 /// dependency here — see docs/design/01-tech-stack.md for why.
 library;
 
+export 'src/ai/danger.dart';
+export 'src/ai/danger_aware_discard.dart';
+export 'src/ai/difficulty.dart';
 export 'src/ai/heuristic_discard.dart';
+export 'src/ai/kita_decision.dart';
 export 'src/ai/ukeire.dart';
 export 'src/core/hand.dart';
 export 'src/core/meld.dart';
