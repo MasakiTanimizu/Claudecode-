@@ -1,12 +1,13 @@
 /// Turn-by-turn state machine for a single 局 (hand/round) (STEP10 実装).
 ///
 /// Scoped to the core draw → (riichi/tsumo) → discard loop, ron on another
-/// player's discard, and exhaustive draw (流局). Calls (チー・ポン・カン) are
-/// NOT handled here — they interrupt normal turn order in a way that needs
-/// its own dedicated slice (a call jumps straight to the caller's discard,
-/// skipping players in between). Every method here assumes no call is
-/// pending; a future call-handling slice will need to extend the phase
-/// model rather than bolt onto this one.
+/// player's discard, and exhaustive draw (流局). Calls (ポン・カン — this
+/// ruleset doesn't use チー, docs/design/05「鳴き・後付け」) are NOT handled
+/// here — they interrupt normal turn order in a way that needs its own
+/// dedicated slice (a call jumps straight to the caller's discard, skipping
+/// players in between). Every method here assumes no call is pending; a
+/// future call-handling slice will need to extend the phase model rather
+/// than bolt onto this one.
 ///
 /// A hand is judged winnable using the same yaku detectors as the rest of
 /// `engine/` (`yaku.dart`, `standard_yaku.dart`), with one addition: a

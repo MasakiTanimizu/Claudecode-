@@ -4,8 +4,10 @@ enum MeldKind { shuntsu, kotsu, kantsu, pair }
 
 /// How a meld came to exist. [concealed] covers both "still in hand" groups
 /// (used only for pair/kotsu bookkeeping before a hand is finalized) and
-/// ankan; the rest are calls off a discard.
-enum CallSource { concealed, chi, pon, daiminkan, shouminkan, ankan }
+/// ankan; the rest are calls off a discard. There is no `chi` — this
+/// ruleset doesn't use it (docs/design/05「鳴き・後付け」), so every
+/// [MeldKind.shuntsu] is necessarily concealed.
+enum CallSource { concealed, pon, daiminkan, shouminkan, ankan }
 
 /// A validated group of tiles: 順子/刻子/槓子/対子.
 ///
@@ -48,9 +50,6 @@ class Meld {
 
   /// 槓子: four tiles of the same [TileKind.tileKind].
   factory Meld.kantsu(List<Tile> tiles, {CallSource source = CallSource.concealed}) {
-    if (source == CallSource.chi) {
-      throw ArgumentError('kantsu cannot come from a chi call');
-    }
     return Meld._(MeldKind.kantsu, _sameKind(tiles, 4), source);
   }
 
@@ -71,11 +70,10 @@ class Meld {
     return List.unmodifiable(tiles);
   }
 
-  /// Whether this meld is visible to other players (chi/pon/daiminkan and
-  /// the exposed shouminkan). Ankan is concealed for yaku purposes even
-  /// though its tiles are shown face-up on the table.
+  /// Whether this meld is visible to other players (pon/daiminkan and the
+  /// exposed shouminkan). Ankan is concealed for yaku purposes even though
+  /// its tiles are shown face-up on the table.
   bool get isOpen =>
-      source == CallSource.chi ||
       source == CallSource.pon ||
       source == CallSource.daiminkan ||
       source == CallSource.shouminkan;

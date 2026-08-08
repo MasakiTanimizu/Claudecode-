@@ -68,16 +68,6 @@ void main() {
       final meld = Meld.kantsu([pin(5), pin(5), pin(5), pin(5)]);
       expect(meld.kind, MeldKind.kantsu);
     });
-
-    test('rejects a chi source (kan cannot come from chi)', () {
-      expect(
-        () => Meld.kantsu(
-          [pin(5), pin(5), pin(5), pin(5)],
-          source: CallSource.chi,
-        ),
-        throwsArgumentError,
-      );
-    });
   });
 
   group('Meld.pair', () {
@@ -92,8 +82,7 @@ void main() {
   });
 
   group('Meld.isOpen', () {
-    test('chi and pon are open', () {
-      expect(Meld.shuntsu([pin(3), pin(4), pin(5)], source: CallSource.chi).isOpen, isTrue);
+    test('pon is open', () {
       expect(Meld.kotsu([pin(5), pin(5), pin(5)], source: CallSource.pon).isOpen, isTrue);
     });
 
