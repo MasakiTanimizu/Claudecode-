@@ -1,0 +1,26 @@
+name: sanma_server
+description: >
+  Server-side authoritative validation, built on mahjong_engine. This
+  package intentionally has no `serverpod` dependency yet — actual
+  Serverpod project scaffolding (endpoints, protocol codegen via
+  `serverpod generate`, Postgres/Redis) needs the real Serverpod CLI and a
+  database, neither of which exist in this sandbox (STEP6 README). What's
+  here — re-deriving the legal outcome of a client's claimed action against
+  the authoritative GameState — doesn't need that toolchain at all, so it's
+  built and tested the same way as the other pure-Dart packages.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  mahjong_engine:
+    path: ../packages/mahjong_engine
+  shared_protocol:
+    path: ../packages/shared_protocol
+  meta: ^1.15.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0
