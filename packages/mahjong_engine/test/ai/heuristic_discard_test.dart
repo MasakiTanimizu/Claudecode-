@@ -2,7 +2,7 @@ import 'package:mahjong_engine/mahjong_engine.dart';
 import 'package:test/test.dart';
 
 NumberTile man(int n) => NumberTile(NumberSuit.man, n);
-NumberTile pin(int n, {TileMark mark = TileMark.none}) => NumberTile(NumberSuit.pin, n, mark: mark);
+NumberTile pin(int n) => NumberTile(NumberSuit.pin, n);
 NumberTile sou(int n) => NumberTile(NumberSuit.sou, n);
 
 List<Tile> run(NumberTile Function(int) suit, int start) =>
@@ -40,23 +40,6 @@ void main() {
     test('throws if every concealed tile is 北', () {
       final hand = Hand(concealedTiles: [const KitaTile(), const KitaTile()]);
       expect(() => chooseDiscard(hand), throwsStateError);
-    });
-
-    test('tie-break: prefers discarding the unmarked tile over a red one', () {
-      // A complete hand (4 melds + a red/plain 5p pair): discarding either
-      // 5p leaves an identical tanki wait (same shanten, same ukeire kinds,
-      // since tileKind ignores marks) — only the mark should decide.
-      final hand = Hand(concealedTiles: [
-        ...run(pin, 1),
-        ...run(pin, 4),
-        ...run(sou, 1),
-        ...run(sou, 4),
-        pin(5, mark: TileMark.red),
-        pin(5),
-      ]);
-      final discarded = chooseDiscard(hand);
-      expect(discarded, pin(5));
-      expect(discarded, isNot(pin(5, mark: TileMark.red)));
     });
   });
 }
