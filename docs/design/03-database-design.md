@@ -31,7 +31,7 @@
 `id` / `owner_user_id`(nullable, null=運営提供の既定プリセット) / `ruleset_key`（どの`RulesetDefinition`実装を使うか） / `name` / `config`(jsonb, そのルールセットのtoggleSchemaに対応) / `updated_at`
 
 ### matches — 対局
-`id` / `mode`(cpu, online_random, friend) / `room_id`(nullable) / `ruleset_key` / `rule_config`(jsonb, 開始時にrule_settings.configをスナップショットコピー、不変) / `difficulty`(easy, medium, hard) / `game_type`(tonpuusen, hanchan) / `extension_count` / `end_reason` / `started_at` / `ended_at`
+`id` / `mode`(cpu, online_random, friend) / `room_id`(nullable) / `ruleset_key` / `rule_config`(jsonb, 開始時にrule_settings.configをスナップショットコピー、不変) / `difficulty`(easy, medium, hard) / `game_type`(tonpuusen, hanchan; デフォルトtonpuusen) / `extension_count` / `end_reason`(normal, bust, aborted, maintenance) / `started_at` / `ended_at`
 
 祝儀清算時のレート値(0.5/100/200)は`difficulty`から導出する（別列は持たない）。オンライン対戦でマッチング不成立によりCPUが空席を埋めた場合も`mode`は`online_random`のまま、該当`match_players.user_id`がnullになるだけで、この対局も通常通り記録・`player_difficulty_stats`に反映される。
 
