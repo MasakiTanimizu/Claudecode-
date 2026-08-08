@@ -1,17 +1,26 @@
 /// Turn-by-turn state machine for a single 局 (hand/round) (STEP10 実装).
 ///
-/// Scoped to the core draw → (riichi/tsumo) → discard loop, pon/ron on
-/// another player's discard, and exhaustive draw (流局). Kan (暗槓・大明槓・
-/// 加槓 — this ruleset doesn't use チー, docs/design/05「鳴き・後付け」) is NOT
-/// handled here yet: it needs a replacement draw and an extra dora reveal
-/// (STEP5「崖」/「ドラ表示」), which is a bigger addition than pon's plain
-/// meld-and-discard. Deferred to its own slice.
+/// Scoped to the core draw → (riichi/tsumo) → discard loop, pon/daiminkan/
+/// ron on another player's discard, ankan/shouminkan on the current
+/// player's own turn, and exhaustive draw (流局). This ruleset doesn't use
+/// チー at all (docs/design/05「鳴き・後付け」).
+///
+/// Every kan (暗槓・大明槓・加槓) reveals the next kan-dora indicator and then
+/// draws a replacement tile — mechanically identical to a normal draw since
+/// there's no separate 嶺上 pool under the 崖 rule (STEP5「山と王牌」). If the
+/// live wall can't cover both, the round ends as an exhaustive draw right
+/// there. 槍槓 (ron on a shouminkan's added tile, before it's absorbed) is
+/// not exposed as a window here — it's one of the context-dependent yaku
+/// already out of scope for `standard_yaku.dart`. A riichi'd hand can
+/// never ankan/shouminkan in this implementation — real rules allow ankan
+/// after riichi only when it provably doesn't change the wait, which needs
+/// machinery this slice doesn't have, so the conservative default is "no."
 ///
 /// Callers are responsible for call priority: this class exposes
-/// [canDeclareRon]/[canDeclarePon] as independent per-player queries and
-/// does not arbitrate between them — real mahjong gives ron priority over
-/// pon on the same discard, so check every player's ron eligibility before
-/// acting on a pon.
+/// [canDeclareRon]/[canDeclarePon]/[canDeclareDaiminkan] as independent
+/// per-player queries and does not arbitrate between them — real mahjong
+/// gives ron priority over pon/kan on the same discard, so check every
+/// player's ron eligibility first.
 ///
 /// A hand is judged winnable using the same yaku detectors as the rest of
 /// `engine/` (`yaku.dart`, `standard_yaku.dart`), with one addition: a
@@ -262,5 +271,133 @@ class GameState {
     currentPlayerIndex = playerIndex;
     _drawnTile = null;
     phase = TurnPhase.awaitingDiscard;
+  }
+
+  /// Reveals the next kan-dora indicator and draws a replacement tile for
+  /// the current player (STEP5「崖」: mechanically identical to a normal
+  /// draw). Ends the round as an exhaustive draw if the live wall can't
+  /// cover both the reveal and the draw.
+  void _drawReplacementAfterKan() {
+    if (wall.remainingLiveCount < 2) {
+      phase = TurnPhase.roundOver;
+      result = const RoundResult(reason: RoundOverReason.exhaustiveDraw);
+      return;
+    }
+    wall.revealNextDoraIndicator();
+    final tile = wall.draw();
+    _drawnTile = tile;
+    hands[currentPlayerIndex] = Hand(
+      concealedTiles: [...hands[currentPlayerIndex].concealedTiles, tile],
+      melds: hands[currentPlayerIndex].melds,
+    );
+    phase = TurnPhase.awaitingDiscard;
+  }
+
+  /// Whether the current player can declare ankan on 4 concealed copies of
+  /// [tile]'s kind. Only meaningful right after their own draw.
+  bool canDeclareAnkan(Tile tile) {
+    if (phase != TurnPhase.awaitingDiscard) return false;
+    if (riichiDeclared.contains(currentPlayerIndex)) return false;
+    final count = currentHand.concealedTiles.where((t) => t.tileKind == tile.tileKind).length;
+    return count >= 4;
+  }
+
+  /// The current player declares ankan on 4 concealed copies of [tile]'s
+  /// kind, then reveals a kan-dora indicator and draws a replacement.
+  void declareAnkan(Tile tile) {
+    if (!canDeclareAnkan(tile)) {
+      throw StateError('cannot ankan $tile right now');
+    }
+    final concealed = List<Tile>.of(currentHand.concealedTiles);
+    final claimed = <Tile>[];
+    for (var i = concealed.length - 1; i >= 0 && claimed.length < 4; i--) {
+      if (concealed[i].tileKind == tile.tileKind) {
+        claimed.add(concealed.removeAt(i));
+      }
+    }
+    final meld = Meld.kantsu(claimed, source: CallSource.ankan);
+    hands[currentPlayerIndex] = Hand(
+      concealedTiles: concealed,
+      melds: [...currentHand.melds, meld],
+    );
+    _drawReplacementAfterKan();
+  }
+
+  /// Whether [playerIndex] holds 3 matching concealed tiles and could
+  /// daiminkan the tile just discarded. Same reaction window as
+  /// [canDeclarePon].
+  bool canDeclareDaiminkan(int playerIndex) {
+    if (phase != TurnPhase.awaitingDraw) return false;
+    if (riichiDeclared.contains(playerIndex)) return false;
+    final lastDiscarder = _lastDiscarderIndex;
+    if (playerIndex == lastDiscarder) return false;
+    final pile = discardPiles[lastDiscarder];
+    if (pile.isEmpty) return false;
+
+    final tileKind = pile.last.tileKind;
+    final matching = hands[playerIndex].concealedTiles.where((t) => t.tileKind == tileKind).length;
+    return matching >= 3;
+  }
+
+  /// [playerIndex] declares daiminkan on the tile just discarded, forming
+  /// an open kantsu from it plus three matching concealed tiles. Turn order
+  /// jumps straight to [playerIndex], who then gets a kan-dora reveal and a
+  /// replacement draw before their discard.
+  void declareDaiminkan(int playerIndex) {
+    if (!canDeclareDaiminkan(playerIndex)) {
+      throw StateError('player $playerIndex cannot daiminkan right now');
+    }
+    final calledTile = discardPiles[_lastDiscarderIndex].last;
+    final hand = hands[playerIndex];
+    final concealed = List<Tile>.of(hand.concealedTiles);
+    final claimed = <Tile>[];
+    for (var i = concealed.length - 1; i >= 0 && claimed.length < 3; i--) {
+      if (concealed[i].tileKind == calledTile.tileKind) {
+        claimed.add(concealed.removeAt(i));
+      }
+    }
+    final meld = Meld.kantsu([...claimed, calledTile], source: CallSource.daiminkan);
+
+    hands[playerIndex] = Hand(concealedTiles: concealed, melds: [...hand.melds, meld]);
+    currentPlayerIndex = playerIndex;
+    _drawReplacementAfterKan();
+  }
+
+  /// Whether the current player can upgrade an existing open pon of
+  /// [tile]'s kind into a kan using a matching concealed tile.
+  bool canDeclareShouminkan(Tile tile) {
+    if (phase != TurnPhase.awaitingDiscard) return false;
+    if (riichiDeclared.contains(currentPlayerIndex)) return false;
+    final hasMatchingConcealed =
+        currentHand.concealedTiles.any((t) => t.tileKind == tile.tileKind);
+    if (!hasMatchingConcealed) return false;
+    return currentHand.melds.any(
+      (m) =>
+          m.kind == MeldKind.kotsu &&
+          m.source == CallSource.pon &&
+          m.tiles.first.tileKind == tile.tileKind,
+    );
+  }
+
+  /// The current player upgrades their existing pon of [tile]'s kind into a
+  /// kan, then reveals a kan-dora indicator and draws a replacement.
+  void declareShouminkan(Tile tile) {
+    if (!canDeclareShouminkan(tile)) {
+      throw StateError('cannot shouminkan $tile right now');
+    }
+    final hand = currentHand;
+    final existingPon = hand.melds.firstWhere(
+      (m) =>
+          m.kind == MeldKind.kotsu &&
+          m.source == CallSource.pon &&
+          m.tiles.first.tileKind == tile.tileKind,
+    );
+    final concealed = List<Tile>.of(hand.concealedTiles);
+    final addedTile = concealed.removeAt(concealed.indexWhere((t) => t.tileKind == tile.tileKind));
+    final newMeld = Meld.kantsu([...existingPon.tiles, addedTile], source: CallSource.shouminkan);
+    final otherMelds = hand.melds.where((m) => m != existingPon).toList();
+
+    hands[currentPlayerIndex] = Hand(concealedTiles: concealed, melds: [...otherMelds, newMeld]);
+    _drawReplacementAfterKan();
   }
 }
