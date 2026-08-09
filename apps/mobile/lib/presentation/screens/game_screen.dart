@@ -16,11 +16,12 @@ import '../widgets/mahjong_table_view.dart';
 /// viewer's discard, so a full round actually plays out. Hana tiles never
 /// reach here as a decision — [GameState] auto-nuku's them.
 ///
-/// Whenever another player's discard is one the viewer could pon and/or
-/// daiminkan, the game pauses right there — before the next player would
-/// otherwise draw — and offers whichever of ポン/カン apply plus a
-/// キャンセル to decline both ([_pon]/[_kan]/[_declineReaction]); declining
-/// (or not being able to react at all) resumes the normal flow.
+/// Whenever another player's discard is one the viewer could ron, pon,
+/// and/or daiminkan, the game pauses right there — before the next player
+/// would otherwise draw — and offers whichever of ロン/ポン/カン apply plus
+/// a キャンセル to decline all of them ([_ron]/[_pon]/[_kan]/
+/// [_declineReaction]); declining (or not being able to react at all)
+/// resumes the normal flow.
 ///
 /// Every hana/kita auto-nuku'd by any player — which otherwise happens
 /// silently inside [GameState], invisible frame-to-frame — pops a SnackBar
@@ -28,8 +29,8 @@ import '../widgets/mahjong_table_view.dart';
 /// 起きたか分かるように), on top of the persistent per-player 抜き牌 list
 /// already shown on the table.
 ///
-/// Still out of scope here: riichi, ron, ankan/shouminkan reactions, and
-/// any wait-tile highlighting — the CPU stand-ins never riichi/call
+/// Still out of scope here: riichi, ankan/shouminkan reactions, and any
+/// wait-tile highlighting — the CPU stand-ins never riichi/call/ron
 /// either (STEP8's fuller decision flow layers on top of this same loop
 /// in a later slice).
 class GameScreen extends StatefulWidget {
@@ -49,9 +50,10 @@ class _GameScreenState extends State<GameScreen> {
 
   // Identifies the one specific discard (by discarder + that discarder's
   // pile length right after it) the viewer has already declined to react
-  // to (pon or kan) — otherwise re-checking after キャンセル would just
-  // immediately re-offer the same still-callable discard forever. A pile
-  // length only ever grows, so this can never false-match a later discard.
+  // to (ron, pon, or kan) — otherwise re-checking after キャンセル would
+  // just immediately re-offer the same still-callable discard forever. A
+  // pile length only ever grows, so this can never false-match a later
+  // discard.
   int? _declinedReactionDiscarderIndex;
   int? _declinedReactionPileLength;
 
@@ -120,10 +122,10 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// Advances the game past a discard that was just made (by the viewer or
-  /// a CPU) — unless the viewer can pon and/or daiminkan it and hasn't
-  /// already declined this exact discard, in which case this pauses right
-  /// here so the UI can offer ポン/カン/キャンセル instead of silently
-  /// moving on.
+  /// a CPU) — unless the viewer can ron, pon, and/or daiminkan it and
+  /// hasn't already declined this exact discard, in which case this pauses
+  /// right here so the UI can offer ロン/ポン/カン/キャンセル instead of
+  /// silently moving on.
   void _advanceAfterDiscard() {
     if (_viewerCanReactToLastDiscard() && !_viewerDeclinedCurrentReaction()) return;
     _runCpuTurns();
@@ -131,11 +133,17 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   bool _viewerCanReactToLastDiscard() =>
-      _state.canDeclarePon(widget.viewerIndex) || _state.canDeclareDaiminkan(widget.viewerIndex);
+      _state.canDeclareRon(widget.viewerIndex) ||
+      _state.canDeclarePon(widget.viewerIndex) ||
+      _state.canDeclareDaiminkan(widget.viewerIndex);
 
   bool _viewerDeclinedCurrentReaction() =>
       _declinedReactionDiscarderIndex == _state.lastDiscarderIndex &&
       _declinedReactionPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
+
+  void _ron() {
+    _runStateChange(() => _state.declareRon(widget.viewerIndex));
+  }
 
   void _pon() {
     _runStateChange(() => _state.declarePon(widget.viewerIndex));
@@ -189,7 +197,7 @@ class _GameScreenState extends State<GameScreen> {
         return;
       }
       _state.discard(chooseDiscard(_state.currentHand));
-      if (_viewerCanReactToLastDiscard()) return; // pause for ポン/カン/キャンセル.
+      if (_viewerCanReactToLastDiscard()) return; // pause for ロン/ポン/カン/キャンセル.
     }
   }
 
@@ -207,6 +215,7 @@ class _GameScreenState extends State<GameScreen> {
     final canDiscard = isViewerTurn && _state.phase == TurnPhase.awaitingDiscard;
     final canTsumo = canDiscard && _state.canDeclareTsumo();
     final pendingKitaTile = isViewerTurn ? _state.pendingKitaTile : null;
+    final canRon = _state.canDeclareRon(widget.viewerIndex);
     final canPon = _state.canDeclarePon(widget.viewerIndex);
     final canKan = _state.canDeclareDaiminkan(widget.viewerIndex);
     final result = _state.result;
@@ -236,11 +245,15 @@ class _GameScreenState extends State<GameScreen> {
                 ),
                 const SizedBox(height: 8),
               ],
-            if (canPon || canKan)
+            if (canRon || canPon || canKan)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
+                    if (canRon) ...[
+                      ElevatedButton(onPressed: _ron, child: const Text('ロン')),
+                      const SizedBox(width: 8),
+                    ],
                     if (canPon) ...[
                       ElevatedButton(onPressed: _pon, child: const Text('ポン')),
                       const SizedBox(width: 8),

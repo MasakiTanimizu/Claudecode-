@@ -143,6 +143,38 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
+  testWidgets('a discard the viewer can ron on offers ロン and ends the round on tap', (tester) async {
+    final chiitoitsuTenpai = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      chiitoitsuTenpai,
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+    ];
+    final wall = Wall([pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.drawForCurrentPlayer(); // player1 (CPU) draws 7p...
+    state.discard(pin(7)); // ...and discards it: the viewer can now ron.
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('ロン'), findsOneWidget);
+    expect(find.text('ポン'), findsNothing);
+    expect(find.text('カン'), findsNothing);
+    expect(find.text('キャンセル'), findsOneWidget);
+
+    await tester.tap(find.text('ロン'));
+    await tester.pump();
+
+    expect(state.isOver, isTrue);
+    expect(state.result!.reason, RoundOverReason.ron);
+    expect(state.result!.winnerIndex, 0);
+    expect(state.result!.dealtInIndex, 1);
+    expect(find.textContaining('ロン和了'), findsOneWidget);
+  });
+
   testWidgets('a discard the viewer can pon pauses the game and offers ポン/キャンセル', (tester) async {
     final hands = [
       Hand(concealedTiles: [sou(9), sou(9), ...filler(pin, 3, 11)]), // viewer: pon-ready on 9s.
