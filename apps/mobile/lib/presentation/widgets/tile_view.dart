@@ -3,14 +3,18 @@ import 'package:mahjong_engine/mahjong_engine.dart';
 
 /// A single tile, rendered on a bordered card using traditional mahjong tile
 /// face conventions — drawn entirely with Flutter's own shapes/text, not
-/// copied from any specific app's art assets, so there's nothing to source
-/// or license:
-/// - pin (筒子): a canonical dot pattern, one row-group per count.
-/// - sou (索子): the same canonical layout, drawn as bamboo bars instead.
+/// copied or traced from any specific app's or stock site's art assets, so
+/// there's nothing to source or license:
+/// - pin (筒子): a canonical dot pattern, one row-group per count, each dot
+///   a colored ring around a smaller center dot.
+/// - sou (索子): the same canonical layout, drawn as segmented bamboo bars.
 /// - man (萬子): a kanji numeral over 萬, in red (only 1m/9m exist here).
 /// - winds/dragons/北/華牌: a single bold, colored rendering of [Tile.label]
 ///   (white dragon gets a blank bordered box, hana get a soft color badge —
 ///   both still keep the label text, just with light decoration around it).
+/// - every tile sits on an ivory face with a thin blue foot band, echoing
+///   the two-tone look common to real/simplified tile sets in general
+///   (a generic convention, not any one artist's specific illustration).
 ///
 /// [Tile.label] is always present as real text somewhere in the tile
 /// (either as the whole rendering, or as the pattern tile's small caption)
@@ -32,38 +36,54 @@ class TileView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final graphic = _graphicFor(tile);
+    final face = graphic == null
+        ? Center(child: _plainLabel(tile))
+        : Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Center(
+                  child: FittedBox(fit: BoxFit.scaleDown, child: graphic),
+                ),
+              ),
+              Text(
+                tile.label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 9, color: Colors.black54),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          );
     return GestureDetector(
       onDoubleTap: onDiscard,
       child: Container(
         width: 34,
         height: 48,
         margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 1),
-        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
         decoration: BoxDecoration(
           color: _backgroundColor(discardable: onDiscard != null),
           border: Border.all(color: Colors.black45),
           borderRadius: BorderRadius.circular(4),
         ),
-        child: graphic == null
-            ? Center(child: _plainLabel(tile))
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(fit: BoxFit.scaleDown, child: graphic),
-                    ),
-                  ),
-                  Text(
-                    tile.label,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 9, color: Colors.black54),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(3.5),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 3, left: 2, right: 2, bottom: 5),
+                child: face,
               ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(height: 2.5, color: Colors.blue.shade800),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -71,7 +91,7 @@ class TileView extends StatelessWidget {
   Color _backgroundColor({required bool discardable}) {
     if (discardable) return Colors.amber.shade50;
     if (tile is KitaTile) return const Color(0xFFFCE9B0);
-    return Colors.white;
+    return const Color(0xFFFFFDF3);
   }
 }
 
@@ -235,9 +255,11 @@ class _TileGrid extends StatelessWidget {
   }
 }
 
-/// One dot in a pin tile's pattern. [accent] renders it red instead of the
-/// default blue (used for 1p's sole dot and 5p's center dot); [big] enlarges
-/// it (used only for 1p, which has just the one dot to fill the tile with).
+/// One dot in a pin tile's pattern: a colored ring around a smaller center
+/// dot, evoking the target-like rings real/simplified pin tiles use. [accent]
+/// swaps the (ring, center) colors to red-toned instead of the default
+/// blue/green (used for 1p's sole dot and 5p's center dot); [big] enlarges it
+/// (used only for 1p, which has just the one dot to fill the tile with).
 class PinDot extends StatelessWidget {
   final bool accent;
   final bool big;
@@ -246,22 +268,28 @@ class PinDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = big ? 14.0 : 5.0;
+    final size = big ? 15.0 : 5.5;
+    final ringColor = accent ? Colors.red.shade700 : Colors.blue.shade800;
+    final centerColor = accent ? Colors.red.shade300 : Colors.green.shade600;
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        color: accent ? Colors.red.shade600 : Colors.blue.shade700,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.black26, width: 0.5),
+      decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: ringColor, width: size * 0.22)),
+      child: Center(
+        child: Container(
+          width: size * 0.4,
+          height: size * 0.4,
+          decoration: BoxDecoration(color: centerColor, shape: BoxShape.circle),
+        ),
       ),
     );
   }
 }
 
-/// One bamboo bar in a sou tile's pattern, with two node lines. [big]
-/// enlarges it (used only for 1s, which has just the one bar to fill the
-/// tile with).
+/// One bamboo bar in a sou tile's pattern: three green segments split by a
+/// red and a dark-green band, evoking the colored joints real/simplified
+/// sou tiles use. [big] enlarges it (used only for 1s, which has just the
+/// one bar to fill the tile with).
 class Bamboo extends StatelessWidget {
   final bool big;
 
@@ -269,18 +297,22 @@ class Bamboo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = big ? 7.0 : 3.0;
-    final height = big ? 18.0 : 5.5;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(color: Colors.green.shade700, borderRadius: BorderRadius.circular(1)),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          Container(height: 0.6, color: Colors.green.shade900),
-          Container(height: 0.6, color: Colors.green.shade900),
-        ],
+    final width = big ? 7.5 : 3.2;
+    final height = big ? 19.0 : 6.0;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(1),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Column(
+          children: [
+            Expanded(child: Container(color: Colors.green.shade700)),
+            Container(height: 0.8, color: Colors.red.shade600),
+            Expanded(child: Container(color: Colors.green.shade700)),
+            Container(height: 0.8, color: Colors.green.shade900),
+            Expanded(child: Container(color: Colors.green.shade700)),
+          ],
+        ),
       ),
     );
   }
