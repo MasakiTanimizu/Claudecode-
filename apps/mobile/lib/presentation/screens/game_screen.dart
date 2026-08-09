@@ -22,6 +22,12 @@ import '../widgets/mahjong_table_view.dart';
 /// キャンセル to decline both ([_pon]/[_kan]/[_declineReaction]); declining
 /// (or not being able to react at all) resumes the normal flow.
 ///
+/// Every hana/kita auto-nuku'd by any player — which otherwise happens
+/// silently inside [GameState], invisible frame-to-frame — pops a SnackBar
+/// naming the tile the instant it happens (STEP7フィードバック改善: 何が
+/// 起きたか分かるように), on top of the persistent per-player 抜き牌 list
+/// already shown on the table.
+///
 /// Still out of scope here: riichi, ron, ankan/shouminkan reactions, and
 /// any wait-tile highlighting — the CPU stand-ins never riichi/call
 /// either (STEP8's fuller decision flow layers on top of this same loop
@@ -52,7 +58,12 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
+    // Can't setState this early (the element isn't mounted yet) — mutate
+    // directly, since the very first build() already reads fresh state,
+    // and defer the SnackBar until a frame has actually gone up.
+    final before = _nukiCounts();
     _autoDrawForViewerIfNeeded();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _announceNewNuki(before));
   }
 
   /// Draws for the viewer with no button press needed, the moment it's
@@ -66,16 +77,43 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
+  /// Runs [action] as a [setState] and, if it caused any player's hana/kita
+  /// to get auto-nuku'd along the way, announces each one via a SnackBar —
+  /// otherwise a hana quietly vanishing off the top of the wall (or a kita
+  /// nuku'd mid CPU-turn-chain) is easy to miss entirely.
+  void _runStateChange(void Function() action) {
+    final before = _nukiCounts();
+    setState(action);
+    _announceNewNuki(before);
+  }
+
+  List<int> _nukiCounts() => [for (final tiles in _state.nukiTiles) tiles.length];
+
+  void _announceNewNuki(List<int> before) {
+    if (!mounted) return;
+    final messages = <String>[];
+    for (var player = 0; player < _state.nukiTiles.length; player++) {
+      final newTiles = _state.nukiTiles[player].sublist(before[player]);
+      if (newTiles.isEmpty) continue;
+      final who = player == widget.viewerIndex ? '自分' : 'プレイヤー$player';
+      messages.add('$whoが${newTiles.map((t) => t.label).join('・')}を抜きました');
+    }
+    if (messages.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(messages.join(' / ')), duration: const Duration(seconds: 2)),
+    );
+  }
+
   void _nukiKita() {
-    setState(_state.nukiKita);
+    _runStateChange(_state.nukiKita);
   }
 
   void _keepKita() {
-    setState(_state.keepDrawnKita);
+    _runStateChange(_state.keepDrawnKita);
   }
 
   void _discard(Tile tile) {
-    setState(() {
+    _runStateChange(() {
       _state.discard(tile);
       _advanceAfterDiscard();
     });
@@ -100,15 +138,15 @@ class _GameScreenState extends State<GameScreen> {
       _declinedReactionPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
 
   void _pon() {
-    setState(() => _state.declarePon(widget.viewerIndex));
+    _runStateChange(() => _state.declarePon(widget.viewerIndex));
   }
 
   void _kan() {
-    setState(() => _state.declareDaiminkan(widget.viewerIndex));
+    _runStateChange(() => _state.declareDaiminkan(widget.viewerIndex));
   }
 
   void _declineReaction() {
-    setState(() {
+    _runStateChange(() {
       _declinedReactionDiscarderIndex = _state.lastDiscarderIndex;
       _declinedReactionPileLength = _state.discardPiles[_state.lastDiscarderIndex].length;
       _advanceAfterDiscard();
@@ -116,7 +154,7 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _declareTsumo() {
-    setState(_state.declareTsumo);
+    _runStateChange(_state.declareTsumo);
   }
 
   /// Resolves every pending kita decision for the current player using the

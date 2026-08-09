@@ -95,6 +95,27 @@ void main() {
     expect(find.textContaining('ツモ和了'), findsOneWidget);
   });
 
+  testWidgets('drawing a hana auto-nuku\'s it and announces which one via SnackBar', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const HanaTile(HanaKind.summer), pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.pump(); // let the postFrameCallback fire.
+
+    expect(state.nukiTiles[0], [const HanaTile(HanaKind.summer)]);
+    expect(state.currentHand.concealedTiles, isNot(contains(const HanaTile(HanaKind.summer))));
+    expect(find.textContaining('自分が夏を抜きました'), findsOneWidget);
+
+    // Flush the SnackBar's own timer so the test framework doesn't see it
+    // as still pending at teardown.
+    await tester.pump(const Duration(seconds: 3));
+  });
+
   testWidgets('drawing a kita shows the nuku/keep choice, and 抜く draws a replacement', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
@@ -117,6 +138,9 @@ void main() {
     expect(state.phase, TurnPhase.awaitingDiscard);
     expect(state.nukiTiles[0], [const KitaTile()]);
     expect(find.text('9p'), findsOneWidget);
+    // 抜く just fired a SnackBar announcing it; let its timer run out so the
+    // test framework doesn't see it as still pending at teardown.
+    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('a discard the viewer can pon pauses the game and offers ポン/キャンセル', (tester) async {
