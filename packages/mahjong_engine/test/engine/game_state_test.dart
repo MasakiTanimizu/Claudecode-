@@ -443,6 +443,22 @@ void main() {
       expect(() => state.discard(const KitaTile()), throwsStateError);
     });
 
+    test('discard rejects a hana even if one is somehow sitting in the hand', () {
+      // Every real hand-entry point auto-nuku's hana on sight, so this
+      // constructs the "shouldn't happen" case directly, as a last-resort
+      // guard check rather than a reachable-in-practice scenario.
+      final hands = [
+        Hand(concealedTiles: [const HanaTile(HanaKind.spring), ...filler(pin, 3, 12)]),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([pin(2), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+      state.drawForCurrentPlayer();
+
+      expect(() => state.discard(const HanaTile(HanaKind.spring)), throwsStateError);
+    });
+
     test('a riichi\'d player\'s kita is always auto-nuku\'d, never pausing for a decision', () {
       final riichiReadyHand = Hand(concealedTiles: [
         ...run(pin, 1),
@@ -496,6 +512,39 @@ void main() {
       expect(state.wall.tiles, hasLength(totalTileCount - 3 * 13));
       expect(state.currentPlayerIndex, 2);
       expect(state.phase, TurnPhase.awaitingDraw);
+    });
+
+    test('hana/kita dealt straight into a starting hand (haipai) are auto-nuku\'d, never left discardable', () {
+      // A real 116-tile set has plenty of wall buffer (77 tiles after
+      // dealing) relative to the 12 hana+kita tiles it contains, so
+      // resolving every haipai special can never run the wall dry. Sweep
+      // several seeds: the core assertion (no hand ever holds a hana/kita
+      // tile) must hold for every one of them, and across enough seeds at
+      // least one is expected to actually deal a special tile into some
+      // hand, exercising the fix rather than passing vacuously.
+      final fullSet = buildFullTileSet(markPreset: DoraMarkPreset.allRed);
+      var totalNukiSpecials = 0;
+
+      for (var seed = 0; seed < 30; seed++) {
+        final state = GameState.deal(
+          fullTileSet: fullSet,
+          playerCount: 3,
+          random: Random(seed),
+          dealerIndex: 0,
+        );
+
+        for (final hand in state.hands) {
+          expect(hand.concealedTiles, hasLength(13));
+          expect(hand.concealedTiles.whereType<HanaTile>(), isEmpty);
+          expect(hand.concealedTiles.whereType<KitaTile>(), isEmpty);
+        }
+        totalNukiSpecials += state.nukiTiles
+            .expand((tiles) => tiles)
+            .where((t) => t is HanaTile || t is KitaTile)
+            .length;
+      }
+
+      expect(totalNukiSpecials, greaterThan(0));
     });
   });
 }

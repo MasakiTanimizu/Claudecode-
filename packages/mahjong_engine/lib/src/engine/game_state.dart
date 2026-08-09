@@ -33,7 +33,10 @@
 /// A kita that's kept in hand can never be discarded ([discard] and
 /// [declareRiichiAndDiscard] both reject it), matching STEP5's "北は誰の
 /// 手からも捨てられない". Neither hana nor kita nuki reveals a dora
-/// indicator — only 槓 does that.
+/// indicator — only 槓 does that. [GameState.deal] separately resolves
+/// hana/kita dealt straight into a starting hand — see
+/// [_resolveHaipaiNukiTiles] for why a haipai kita never gets the
+/// keep-in-hand choice a drawn one does.
 ///
 /// A hand is judged winnable using the same yaku detectors as the rest of
 /// `engine/` (`yaku.dart`, `standard_yaku.dart`), with one addition: a
@@ -103,7 +106,9 @@ class GameState {
         phase = TurnPhase.awaitingDraw;
 
   /// Deals a fresh hand from [fullTileSet] and wraps it in a ready-to-play
-  /// [GameState] (STEP5「山と王牌」via `dealHands`).
+  /// [GameState] (STEP5「山と王牌」via `dealHands`), then immediately
+  /// resolves any hana/kita dealt straight into a starting hand (haipai) —
+  /// see [_resolveHaipaiNukiTiles].
   factory GameState.deal({
     required List<Tile> fullTileSet,
     required int playerCount,
@@ -111,11 +116,55 @@ class GameState {
     required int dealerIndex,
   }) {
     final dealt = dealHands(fullTileSet, playerCount: playerCount, random: random);
-    return GameState(
+    final state = GameState(
       hands: [for (final h in dealt.hands) Hand(concealedTiles: h)],
       wall: dealt.wall,
       dealerIndex: dealerIndex,
     );
+    state._resolveHaipaiNukiTiles();
+    return state;
+  }
+
+  /// Nuku's every hana or kita tile dealt straight into a starting hand,
+  /// replacing each from the wall — dealing (unlike a mid-round tsumo)
+  /// isn't "drawing on your turn", so there's no natural point to hang a
+  /// keep-or-nuku choice off of, and juggling a pending decision per player
+  /// before the round even starts isn't worth it for what's otherwise a
+  /// straightforward "these can't be legally discarded either way" outcome.
+  /// A haipai kita is therefore always auto-nuku'd, unlike one drawn mid-
+  /// round via [nukiKita]/[keepDrawnKita]. Ends the round as an exhaustive
+  /// draw if the wall can't cover every replacement (vanishingly unlikely
+  /// at this ruleset's 116-tile set).
+  void _resolveHaipaiNukiTiles() {
+    for (var player = 0; player < hands.length; player++) {
+      final targetSize = hands[player].concealedTiles.length;
+      final keep = <Tile>[];
+      for (final tile in hands[player].concealedTiles) {
+        if (tile is HanaTile || tile is KitaTile) {
+          nukiTiles[player].add(tile);
+        } else {
+          keep.add(tile);
+        }
+      }
+      hands[player] = Hand(concealedTiles: keep, melds: hands[player].melds);
+
+      while (hands[player].concealedTiles.length < targetSize) {
+        if (wall.isExhausted) {
+          phase = TurnPhase.roundOver;
+          result = const RoundResult(reason: RoundOverReason.exhaustiveDraw);
+          return;
+        }
+        final tile = wall.draw();
+        if (tile is HanaTile || tile is KitaTile) {
+          nukiTiles[player].add(tile);
+          continue;
+        }
+        hands[player] = Hand(
+          concealedTiles: [...hands[player].concealedTiles, tile],
+          melds: hands[player].melds,
+        );
+      }
+    }
   }
 
   bool get isOver => phase == TurnPhase.roundOver;
@@ -247,11 +296,18 @@ class GameState {
   /// The current player discards [tile]. If they've already declared
   /// riichi, [tile] must be the one they just drew — a riichi hand stays
   /// locked (STEP5 default riichi behavior). A kita kept in hand can never
-  /// be discarded (STEP5「北」).
+  /// be discarded (STEP5「北」), and neither can a hana — though in
+  /// practice a hana should never be sitting in a hand to begin with, since
+  /// every hand-entry point ([_resolveNextDraw], [_resolveHaipaiNukiTiles])
+  /// already auto-nuku's it; this is a last-resort guard, not the primary
+  /// defense.
   void discard(Tile tile) {
     _requirePhase(TurnPhase.awaitingDiscard);
     if (tile is KitaTile) {
       throw StateError('北 can never be discarded — nuku it or keep it until the round ends');
+    }
+    if (tile is HanaTile) {
+      throw StateError('華牌 can never be discarded');
     }
     if (riichiDeclared.contains(currentPlayerIndex) && tile != _drawnTile) {
       throw StateError('a riichi hand can only discard the tile just drawn');
@@ -265,6 +321,9 @@ class GameState {
     _requirePhase(TurnPhase.awaitingDiscard);
     if (tile is KitaTile) {
       throw StateError('北 can never be discarded — nuku it or keep it until the round ends');
+    }
+    if (tile is HanaTile) {
+      throw StateError('華牌 can never be discarded');
     }
     if (!currentHand.isMenzen) {
       throw StateError('cannot declare riichi with an open hand');
