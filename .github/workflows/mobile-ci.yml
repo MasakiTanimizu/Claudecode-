@@ -34,3 +34,6 @@ jobs:
         continue-on-error: true
       - run: flutter analyze --fatal-infos
       - run: flutter test
+      # Web needs no Mac/Xcode (unlike iOS), so it's the one native-ish
+      # target this sandbox can actually verify end to end.
+      - run: flutter build web
