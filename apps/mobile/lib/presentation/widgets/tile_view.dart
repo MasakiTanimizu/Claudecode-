@@ -49,9 +49,16 @@ class TileView extends StatelessWidget {
             : Column(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(child: Center(child: graphic)),
+                  Expanded(
+                    child: Center(
+                      child: FittedBox(fit: BoxFit.scaleDown, child: graphic),
+                    ),
+                  ),
                   Text(
                     tile.label,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 9, color: Colors.black54),
                     textAlign: TextAlign.center,
                   ),
