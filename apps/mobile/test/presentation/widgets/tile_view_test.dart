@@ -18,6 +18,25 @@ void main() {
     expect(find.text('北'), findsOneWidget);
   });
 
+  testWidgets('a pin/sou number tile shows one pip per count, plus its label', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: TileView(NumberTile(NumberSuit.pin, 5))),
+    );
+
+    expect(find.text('5p'), findsOneWidget);
+    final wrap = tester.widget<Wrap>(find.byType(Wrap));
+    expect(wrap.children, hasLength(5));
+  });
+
+  testWidgets('a man tile (no pip pattern in this ruleset) renders as text only', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: TileView(NumberTile(NumberSuit.man, 9))),
+    );
+
+    expect(find.text('9m'), findsOneWidget);
+    expect(find.byType(Wrap), findsNothing);
+  });
+
   testWidgets('double-tap triggers onDiscard; a single tap does not', (tester) async {
     var discarded = false;
     await tester.pumpWidget(
