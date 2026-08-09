@@ -4,6 +4,7 @@ import 'package:shared_protocol/shared_protocol.dart';
 
 import '../widgets/discard_pile_view.dart';
 import '../widgets/hand_view.dart';
+import '../widgets/mahjong_table_view.dart';
 
 /// One player's view of a live [GameState] (STEP7「対局画面」), interactive
 /// for the viewer's own turn: draw, double-tap a tile to discard, declare
@@ -122,16 +123,8 @@ class _GameScreenState extends State<GameScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),
-            Text('ドラ表示: ${view.doraIndicators.map((t) => t.label).join(' ')}'),
-            Text('手番: プレイヤー${view.currentPlayerIndex}  局面: ${view.phase.name}'),
+            MahjongTableView(view: view),
             const SizedBox(height: 12),
-            for (var i = 0; i < view.discardPiles.length; i++) ...[
-              DiscardPileView(
-                playerLabel: i == view.dealerIndex ? 'プレイヤー$i（親）' : 'プレイヤー$i',
-                discards: view.discardPiles[i],
-              ),
-              const SizedBox(height: 8),
-            ],
             for (var i = 0; i < view.nukiTiles.length; i++)
               if (view.nukiTiles[i].isNotEmpty) ...[
                 DiscardPileView(
