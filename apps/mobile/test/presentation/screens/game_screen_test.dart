@@ -132,8 +132,8 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
 
-    expect(find.textContaining('プレイヤー1の捨てた9sをポンできます'), findsOneWidget);
     expect(find.text('ポン'), findsOneWidget);
+    expect(find.text('カン'), findsNothing); // only 2 matching tiles, not 3.
     expect(find.text('キャンセル'), findsOneWidget);
     // Paused right at the reaction window — player2 hasn't drawn yet.
     expect(state.currentPlayerIndex, 2);
@@ -145,6 +145,33 @@ void main() {
     expect(state.currentPlayerIndex, 0);
     expect(state.phase, TurnPhase.awaitingDiscard);
     expect(state.hands[0].melds, hasLength(1));
+    expect(state.hands[0].concealedTiles, hasLength(11));
+  });
+
+  testWidgets('a discard the viewer can daiminkan offers カン alongside ポン', (tester) async {
+    final hands = [
+      Hand(concealedTiles: [sou(9), sou(9), sou(9), ...filler(pin, 3, 10)]), // 3 matching: pon or kan.
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(9), man(9), ...filler(pin, 1, 10)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.drawForCurrentPlayer();
+    state.discard(sou(9));
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('ポン'), findsOneWidget);
+    expect(find.text('カン'), findsOneWidget);
+    expect(find.text('キャンセル'), findsOneWidget);
+
+    await tester.tap(find.text('カン'));
+    await tester.pump();
+
+    expect(state.currentPlayerIndex, 0);
+    expect(state.hands[0].melds, hasLength(1));
+    expect(state.hands[0].melds.single.kind, MeldKind.kantsu);
+    // 13 - 3 claimed into the kan + 1 kan replacement draw = 11.
     expect(state.hands[0].concealedTiles, hasLength(11));
   });
 
