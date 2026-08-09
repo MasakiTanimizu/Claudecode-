@@ -344,15 +344,18 @@ class GameState {
 
   /// The player who made the discard currently open for ron/pon — only
   /// meaningful while [phase] is [TurnPhase.awaitingDraw], i.e. right after
-  /// a discard and before the next player has drawn.
-  int get _lastDiscarderIndex => (currentPlayerIndex - 1 + hands.length) % hands.length;
+  /// a discard and before the next player has drawn. A caller building a
+  /// reaction UI (e.g. "プレイヤーNの捨てた牌をポンできます") can use this
+  /// together with [discardPiles] to name the discard a [canDeclarePon]/
+  /// [canDeclareRon]/[canDeclareDaiminkan] query is actually about.
+  int get lastDiscarderIndex => (currentPlayerIndex - 1 + hands.length) % hands.length;
 
   /// Whether [playerIndex] could declare ron on the tile just discarded.
   /// Only meaningful right after a discard (phase is [TurnPhase.awaitingDraw]
   /// for the *next* player) and before that next player draws.
   bool canDeclareRon(int playerIndex) {
     if (phase != TurnPhase.awaitingDraw) return false;
-    final lastDiscarder = _lastDiscarderIndex;
+    final lastDiscarder = lastDiscarderIndex;
     if (playerIndex == lastDiscarder) return false;
     final pile = discardPiles[lastDiscarder];
     if (pile.isEmpty) return false;
@@ -373,7 +376,7 @@ class GameState {
     if (!canDeclareRon(playerIndex)) {
       throw StateError('player $playerIndex cannot declare ron right now');
     }
-    final lastDiscarder = _lastDiscarderIndex;
+    final lastDiscarder = lastDiscarderIndex;
     phase = TurnPhase.roundOver;
     result = RoundResult(
       reason: RoundOverReason.ron,
@@ -388,7 +391,7 @@ class GameState {
   bool canDeclarePon(int playerIndex) {
     if (phase != TurnPhase.awaitingDraw) return false;
     if (riichiDeclared.contains(playerIndex)) return false;
-    final lastDiscarder = _lastDiscarderIndex;
+    final lastDiscarder = lastDiscarderIndex;
     if (playerIndex == lastDiscarder) return false;
     final pile = discardPiles[lastDiscarder];
     if (pile.isEmpty) return false;
@@ -406,7 +409,7 @@ class GameState {
     if (!canDeclarePon(playerIndex)) {
       throw StateError('player $playerIndex cannot pon right now');
     }
-    final calledTile = discardPiles[_lastDiscarderIndex].last;
+    final calledTile = discardPiles[lastDiscarderIndex].last;
     final hand = hands[playerIndex];
     final concealed = List<Tile>.of(hand.concealedTiles);
     final claimed = <Tile>[];
@@ -474,7 +477,7 @@ class GameState {
   bool canDeclareDaiminkan(int playerIndex) {
     if (phase != TurnPhase.awaitingDraw) return false;
     if (riichiDeclared.contains(playerIndex)) return false;
-    final lastDiscarder = _lastDiscarderIndex;
+    final lastDiscarder = lastDiscarderIndex;
     if (playerIndex == lastDiscarder) return false;
     final pile = discardPiles[lastDiscarder];
     if (pile.isEmpty) return false;
@@ -492,7 +495,7 @@ class GameState {
     if (!canDeclareDaiminkan(playerIndex)) {
       throw StateError('player $playerIndex cannot daiminkan right now');
     }
-    final calledTile = discardPiles[_lastDiscarderIndex].last;
+    final calledTile = discardPiles[lastDiscarderIndex].last;
     final hand = hands[playerIndex];
     final concealed = List<Tile>.of(hand.concealedTiles);
     final claimed = <Tile>[];

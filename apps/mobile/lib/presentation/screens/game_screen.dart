@@ -16,10 +16,14 @@ import '../widgets/mahjong_table_view.dart';
 /// viewer's discard, so a full round actually plays out. Hana tiles never
 /// reach here as a decision — [GameState] auto-nuku's them.
 ///
-/// Still out of scope here: riichi, ron, pon, kan, and any wait-tile
-/// highlighting — the viewer can only draw/discard/tsumo/kita-decide for
-/// now, and the CPU stand-ins never riichi/call either (STEP8's fuller
-/// decision flow layers on top of this same loop in a later slice).
+/// Whenever another player's discard is one the viewer could pon, the game
+/// pauses right there — before the next player would otherwise draw — and
+/// offers an explicit ポン/キャンセル choice ([_pon]/[_cancelPon]); declining
+/// (or not being able to pon) resumes the normal flow.
+///
+/// Still out of scope here: riichi, ron, kan, and any wait-tile
+/// highlighting — the CPU stand-ins never riichi/call/pon either (STEP8's
+/// fuller decision flow layers on top of this same loop in a later slice).
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
@@ -34,6 +38,14 @@ const _cpuKitaDifficulty = CpuDifficulty.intermediate;
 
 class _GameScreenState extends State<GameScreen> {
   GameState get _state => widget.state;
+
+  // Identifies the one specific discard (by discarder + that discarder's
+  // pile length right after it) the viewer has already declined to pon —
+  // otherwise re-checking canDeclarePon after キャンセル would just
+  // immediately re-offer the same still-ponnable discard forever. A pile
+  // length only ever grows, so this can never false-match a later discard.
+  int? _declinedPonDiscarderIndex;
+  int? _declinedPonPileLength;
 
   @override
   void initState() {
@@ -63,8 +75,33 @@ class _GameScreenState extends State<GameScreen> {
   void _discard(Tile tile) {
     setState(() {
       _state.discard(tile);
-      _runCpuTurns();
-      _autoDrawForViewerIfNeeded();
+      _advanceAfterDiscard();
+    });
+  }
+
+  /// Advances the game past a discard that was just made (by the viewer or
+  /// a CPU) — unless the viewer can pon it and hasn't already declined this
+  /// exact discard, in which case this pauses right here so the UI can
+  /// offer ポン/キャンセル instead of silently moving on.
+  void _advanceAfterDiscard() {
+    if (_state.canDeclarePon(widget.viewerIndex) && !_viewerDeclinedCurrentPon()) return;
+    _runCpuTurns();
+    _autoDrawForViewerIfNeeded();
+  }
+
+  bool _viewerDeclinedCurrentPon() =>
+      _declinedPonDiscarderIndex == _state.lastDiscarderIndex &&
+      _declinedPonPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
+
+  void _pon() {
+    setState(() => _state.declarePon(widget.viewerIndex));
+  }
+
+  void _cancelPon() {
+    setState(() {
+      _declinedPonDiscarderIndex = _state.lastDiscarderIndex;
+      _declinedPonPileLength = _state.discardPiles[_state.lastDiscarderIndex].length;
+      _advanceAfterDiscard();
     });
   }
 
@@ -104,6 +141,7 @@ class _GameScreenState extends State<GameScreen> {
         return;
       }
       _state.discard(chooseDiscard(_state.currentHand));
+      if (_state.canDeclarePon(widget.viewerIndex)) return; // pause for ポン/キャンセル.
     }
   }
 
@@ -121,6 +159,9 @@ class _GameScreenState extends State<GameScreen> {
     final canDiscard = isViewerTurn && _state.phase == TurnPhase.awaitingDiscard;
     final canTsumo = canDiscard && _state.canDeclareTsumo();
     final pendingKitaTile = isViewerTurn ? _state.pendingKitaTile : null;
+    final canPon = _state.canDeclarePon(widget.viewerIndex);
+    final ponDiscarderIndex = canPon ? _state.lastDiscarderIndex : null;
+    final ponTile = canPon ? _state.discardPiles[_state.lastDiscarderIndex].last : null;
     final result = _state.result;
 
     return Scaffold(
@@ -148,6 +189,19 @@ class _GameScreenState extends State<GameScreen> {
                 ),
                 const SizedBox(height: 8),
               ],
+            if (canPon)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Text('プレイヤー$ponDiscarderIndexの捨てた${ponTile!.label}をポンできます'),
+                    const SizedBox(width: 8),
+                    ElevatedButton(onPressed: _pon, child: const Text('ポン')),
+                    const SizedBox(width: 8),
+                    ElevatedButton(onPressed: _cancelPon, child: const Text('キャンセル')),
+                  ],
+                ),
+              ),
             if (pendingKitaTile != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),

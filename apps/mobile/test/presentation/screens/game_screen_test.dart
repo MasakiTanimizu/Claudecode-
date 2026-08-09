@@ -119,6 +119,56 @@ void main() {
     expect(find.text('9p'), findsOneWidget);
   });
 
+  testWidgets('a discard the viewer can pon pauses the game and offers ポン/キャンセル', (tester) async {
+    final hands = [
+      Hand(concealedTiles: [sou(9), sou(9), ...filler(pin, 3, 11)]), // viewer: pon-ready on 9s.
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(9), man(9), ...filler(pin, 1, 10)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.drawForCurrentPlayer(); // player1 (CPU) draws 9s...
+    state.discard(sou(9)); // ...and discards it: the viewer can now pon.
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.textContaining('プレイヤー1の捨てた9sをポンできます'), findsOneWidget);
+    expect(find.text('ポン'), findsOneWidget);
+    expect(find.text('キャンセル'), findsOneWidget);
+    // Paused right at the reaction window — player2 hasn't drawn yet.
+    expect(state.currentPlayerIndex, 2);
+    expect(state.phase, TurnPhase.awaitingDraw);
+
+    await tester.tap(find.text('ポン'));
+    await tester.pump();
+
+    expect(state.currentPlayerIndex, 0);
+    expect(state.phase, TurnPhase.awaitingDiscard);
+    expect(state.hands[0].melds, hasLength(1));
+    expect(state.hands[0].concealedTiles, hasLength(11));
+  });
+
+  testWidgets('キャンセル declines the pon and resumes play without re-offering it', (tester) async {
+    final hands = [
+      Hand(concealedTiles: [sou(9), sou(9), ...filler(pin, 3, 11)]),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(9), man(9), ...filler(pin, 1, 10)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.drawForCurrentPlayer();
+    state.discard(sou(9));
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('キャンセル'));
+    await tester.pump();
+
+    expect(find.text('ポン'), findsNothing);
+    expect(find.text('キャンセル'), findsNothing);
+    expect(state.hands[0].melds, isEmpty);
+    expect(state.discardPiles[1], [sou(9)]); // untouched — no pon was declared.
+  });
+
   testWidgets('drawing a kita and choosing 残す keeps it in the hand', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
