@@ -127,9 +127,8 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
 
-    expect(find.textContaining('北を引きました'), findsOneWidget);
     expect(find.text('抜く'), findsOneWidget);
-    expect(find.text('残す'), findsOneWidget);
+    expect(find.text('キャンセル'), findsOneWidget);
     expect(state.phase, TurnPhase.awaitingKitaDecision);
 
     await tester.tap(find.text('抜く'));
@@ -252,7 +251,7 @@ void main() {
     expect(state.discardPiles[1], [sou(9)]); // untouched — no pon was declared.
   });
 
-  testWidgets('drawing a kita and choosing 残す keeps it in the hand', (tester) async {
+  testWidgets('drawing a kita and choosing キャンセル keeps it in the hand', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
       Hand(concealedTiles: filler(sou, 3, 13)),
@@ -262,7 +261,7 @@ void main() {
     final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.tap(find.text('残す'));
+    await tester.tap(find.text('キャンセル'));
     await tester.pump();
 
     expect(state.phase, TurnPhase.awaitingDiscard);

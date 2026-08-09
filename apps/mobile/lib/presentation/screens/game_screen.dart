@@ -10,7 +10,8 @@ import '../widgets/mahjong_table_view.dart';
 /// for the viewer's own turn: the viewer's draw happens automatically (no
 /// manual "ツモ" button — drawing carries no decision, unlike discarding),
 /// then they double-tap a tile to discard, declare tsumo when available, or
-/// resolve a drawn kita (抜く/残す) when one comes up. The other two players
+/// resolve a drawn kita (抜く/キャンセル, i.e. keep it in hand) when one
+/// comes up. The other two players
 /// are driven locally by the tile-efficiency CPU baseline
 /// (`ai/heuristic_discard.dart` and `ai/kita_decision.dart`) right after the
 /// viewer's discard, so a full round actually plays out. Hana tiles never
@@ -271,11 +272,9 @@ class _GameScreenState extends State<GameScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
-                    Text('北を引きました（${pendingKitaTile.label}）: 抜きますか、残しますか？'),
-                    const SizedBox(width: 8),
                     ElevatedButton(onPressed: _nukiKita, child: const Text('抜く')),
                     const SizedBox(width: 8),
-                    ElevatedButton(onPressed: _keepKita, child: const Text('残す')),
+                    ElevatedButton(onPressed: _keepKita, child: const Text('キャンセル')),
                   ],
                 ),
               ),
