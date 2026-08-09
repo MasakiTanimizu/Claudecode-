@@ -159,6 +159,55 @@ void main() {
       state.drawForCurrentPlayer();
       expect(() => state.declareRiichiAndDiscard(pin(2)), throwsStateError);
     });
+
+    test('canDeclareRiichi/canDeclareRiichiWith reflect whether some discard keeps the hand tenpai', () {
+      final riichiReadyHand = Hand(concealedTiles: [
+        ...run(pin, 1),
+        ...run(pin, 4),
+        ...run(pin, 7),
+        DragonTile(Dragon.white),
+        DragonTile(Dragon.white),
+        sou(4),
+        sou(5),
+      ]);
+      final hands = [
+        riichiReadyHand,
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([man(9), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      expect(state.canDeclareRiichi, isFalse); // not the player's turn to discard yet.
+
+      state.drawForCurrentPlayer(); // draws man(9), a junk tile.
+      expect(state.canDeclareRiichi, isTrue);
+      expect(state.canDeclareRiichiWith(man(9)), isTrue); // discarding the junk keeps tenpai.
+      expect(state.canDeclareRiichiWith(pin(1)), isFalse); // breaks up the hand instead.
+
+      state.declareRiichiAndDiscard(man(9));
+      expect(state.canDeclareRiichi, isFalse); // already riichi.
+    });
+
+    test('canDeclareRiichi is false for an open hand or a hand nowhere near tenpai', () {
+      final openHand = Hand(
+        concealedTiles: [...run(pin, 1), ...run(pin, 4), ...run(pin, 7), sou(4), sou(5)],
+        melds: [
+          Meld.kotsu([DragonTile(Dragon.white), DragonTile(Dragon.white), DragonTile(Dragon.white)],
+              source: CallSource.pon),
+        ],
+      );
+      final hands = [
+        openHand,
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([man(9), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      state.drawForCurrentPlayer();
+      expect(state.canDeclareRiichi, isFalse); // open hand.
+    });
   });
 
   group('GameState ron', () {

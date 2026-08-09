@@ -9,15 +9,19 @@ import '../widgets/mahjong_table_view.dart';
 /// One player's view of a live [GameState] (STEP7「対局画面」), interactive
 /// for the viewer's own turn: the viewer's draw happens automatically (no
 /// manual "ツモ" button — drawing carries no decision, unlike discarding),
-/// then they double-tap a tile to discard, declare tsumo when available, or
-/// resolve a kita (抜く/キャンセル, i.e. keep it in hand) whenever one comes
-/// up — including any dealt straight into their opening hand, which
-/// [GameState] offers the exact same choice for as one drawn mid-round. The
-/// other two players are driven locally by the tile-efficiency CPU baseline
-/// (`ai/heuristic_discard.dart` and `ai/kita_decision.dart`), both mid-round
-/// and for their own haipai kita ([_resolveKitaDecisionsForCpu], also
-/// reused from [initState]). Hana tiles never reach here as a decision,
-/// haipai included — [GameState] always auto-nuku's them.
+/// then they double-tap a tile to discard, declare tsumo when available,
+/// declare riichi ([_toggleRiichiMode] then double-tap a tenpai-preserving
+/// tile), declare 暗槓/加槓 when their hand allows it ([_ankan]/
+/// [_shouminkan]), or resolve a kita (抜く/キャンセル, i.e. keep it in hand)
+/// whenever one comes up — including any dealt straight into their opening
+/// hand, which [GameState] offers the exact same choice for as one drawn
+/// mid-round. The other two players are driven locally by the tile-
+/// efficiency CPU baseline (`ai/heuristic_discard.dart` and
+/// `ai/kita_decision.dart`), both mid-round and for their own haipai kita
+/// ([_resolveKitaDecisionsForCpu], also reused from [initState]) — they
+/// also riichi themselves whenever their chosen discard would keep them
+/// tenpai. Hana tiles never reach here as a decision, haipai included —
+/// [GameState] always auto-nuku's them.
 ///
 /// Whenever another player's discard is one the viewer could ron, pon,
 /// and/or daiminkan, the game pauses right there — before the next player
@@ -26,13 +30,13 @@ import '../widgets/mahjong_table_view.dart';
 /// [_declineReaction]); declining (or not being able to react at all)
 /// resumes the normal flow.
 ///
-/// Still out of scope here: riichi, ankan/shouminkan reactions, any
-/// wait-tile highlighting, and any visible animation for a hana/kita
-/// being nuku'd (each player's own 抜き牌 list on the table is the only
-/// record for now — a real "revealed live" animation is worth doing once
-/// there's real tile art to animate, not urgent before then) — the CPU
-/// stand-ins never riichi/call/ron either (STEP8's fuller decision flow
-/// layers on top of this same loop in a later slice).
+/// Still out of scope here: the CPU stand-ins never call (pon/kan/ron) on
+/// another player's discard, only riichi on their own turn; ankan/
+/// shouminkan as a reaction to someone else's discard/kan (槍槓) isn't
+/// modeled; and there's no wait-tile highlighting or visible animation for
+/// a hana/kita being nuku'd (each player's own 抜き牌 list on the table is
+/// the only record for now — worth animating once there's real tile art,
+/// not urgent before then).
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
@@ -56,6 +60,13 @@ class _GameScreenState extends State<GameScreen> {
   // discard.
   int? _declinedReactionDiscarderIndex;
   int? _declinedReactionPileLength;
+
+  // Whether the viewer has pressed リーチ and is now picking which tile to
+  // riichi-discard — while true, [_discard] declares riichi with the
+  // tapped tile instead of a plain discard (and ignores taps on tiles that
+  // wouldn't keep the hand tenpai, rather than surprising the player with
+  // a plain discard they didn't ask for).
+  bool _riichiMode = false;
 
   @override
   void initState() {
@@ -107,10 +118,59 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _discard(Tile tile) {
+    if (_riichiMode) {
+      if (!_state.canDeclareRiichiWith(tile)) return; // only a tenpai-preserving tile is valid.
+      setState(() {
+        _state.declareRiichiAndDiscard(tile);
+        _riichiMode = false;
+        _advanceAfterDiscard();
+      });
+      return;
+    }
     setState(() {
       _state.discard(tile);
       _advanceAfterDiscard();
     });
+  }
+
+  void _toggleRiichiMode() {
+    setState(() => _riichiMode = !_riichiMode);
+  }
+
+  void _ankan(Tile tile) {
+    setState(() {
+      _state.declareAnkan(tile);
+      _riichiMode = false; // the hand just changed; any pending riichi pick is stale.
+    });
+  }
+
+  void _shouminkan(Tile tile) {
+    setState(() {
+      _state.declareShouminkan(tile);
+      _riichiMode = false;
+    });
+  }
+
+  /// A concealed tile the viewer could ankan right now, if any — the
+  /// first tile kind found with 4 concealed copies.
+  Tile? _ankanCandidate() {
+    final tally = <Object, int>{};
+    for (final tile in _state.currentHand.concealedTiles) {
+      tally[tile.tileKind] = (tally[tile.tileKind] ?? 0) + 1;
+    }
+    for (final tile in _state.currentHand.concealedTiles) {
+      if (tally[tile.tileKind]! >= 4 && _state.canDeclareAnkan(tile)) return tile;
+    }
+    return null;
+  }
+
+  /// A concealed tile the viewer could use to upgrade an existing pon into
+  /// a shouminkan right now, if any.
+  Tile? _shouminkanCandidate() {
+    for (final tile in _state.currentHand.concealedTiles) {
+      if (_state.canDeclareShouminkan(tile)) return tile;
+    }
+    return null;
   }
 
   /// Advances the game past a discard that was just made (by the viewer or
@@ -178,8 +238,9 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// Drives every other player's turn (draw, resolve any kita decision,
-  /// then tsumo if possible, otherwise a tile-efficiency discard) until
-  /// control returns to the viewer or the round ends.
+  /// then tsumo if possible, otherwise a tile-efficiency discard —
+  /// declaring riichi with it first if that discard would keep them
+  /// tenpai) until control returns to the viewer or the round ends.
   void _runCpuTurns() {
     while (!_state.isOver && _state.currentPlayerIndex != widget.viewerIndex) {
       _state.drawForCurrentPlayer();
@@ -190,7 +251,12 @@ class _GameScreenState extends State<GameScreen> {
         _state.declareTsumo();
         return;
       }
-      _state.discard(chooseDiscard(_state.currentHand));
+      final discardTile = chooseDiscard(_state.currentHand);
+      if (_state.canDeclareRiichiWith(discardTile)) {
+        _state.declareRiichiAndDiscard(discardTile);
+      } else {
+        _state.discard(discardTile);
+      }
       if (_viewerCanReactToLastDiscard()) return; // pause for ロン/ポン/カン/キャンセル.
     }
   }
@@ -212,6 +278,9 @@ class _GameScreenState extends State<GameScreen> {
     final canRon = _state.canDeclareRon(widget.viewerIndex);
     final canPon = _state.canDeclarePon(widget.viewerIndex);
     final canKan = _state.canDeclareDaiminkan(widget.viewerIndex);
+    final canRiichi = canDiscard && _state.canDeclareRiichi;
+    final ankanTile = canDiscard ? _ankanCandidate() : null;
+    final shouminkanTile = canDiscard ? _shouminkanCandidate() : null;
     final result = _state.result;
 
     return Scaffold(
@@ -277,9 +346,22 @@ class _GameScreenState extends State<GameScreen> {
                 const Text('自分の手牌', style: TextStyle(fontWeight: FontWeight.bold)),
                 const Spacer(),
                 if (canTsumo) ...[
-                  const SizedBox(width: 8),
                   ElevatedButton(onPressed: _declareTsumo, child: const Text('和了')),
+                  const SizedBox(width: 8),
                 ],
+                if (canRiichi || _riichiMode) ...[
+                  ElevatedButton(
+                    onPressed: _toggleRiichiMode,
+                    child: Text(_riichiMode ? 'リーチ選択中（キャンセル）' : 'リーチ'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (ankanTile != null) ...[
+                  ElevatedButton(onPressed: () => _ankan(ankanTile), child: const Text('暗槓')),
+                  const SizedBox(width: 8),
+                ],
+                if (shouminkanTile != null)
+                  ElevatedButton(onPressed: () => _shouminkan(shouminkanTile), child: const Text('加槓')),
               ],
             ),
             HandView(

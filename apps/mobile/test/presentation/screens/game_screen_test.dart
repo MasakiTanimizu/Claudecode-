@@ -97,6 +97,150 @@ void main() {
     expect(find.textContaining('ツモ和了'), findsOneWidget);
   });
 
+  testWidgets('リーチ then double-tapping a tenpai-preserving tile declares riichi', (tester) async {
+    final riichiReadyHand = Hand(concealedTiles: [
+      pin(1), pin(2), pin(3),
+      pin(4), pin(5), pin(6),
+      pin(7), pin(8), pin(9),
+      DragonTile(Dragon.white), DragonTile(Dragon.white),
+      sou(4), sou(5),
+    ]);
+    final hands = [
+      riichiReadyHand,
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([man(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('リーチ'), findsOneWidget);
+    await tester.tap(find.text('リーチ'));
+    await tester.pump();
+    expect(find.text('リーチ選択中（キャンセル）'), findsOneWidget);
+
+    await tester.tap(find.text('9m'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('9m'));
+    await tester.pump();
+
+    expect(state.riichiDeclared, contains(0));
+    expect(state.discardPiles[0], [man(9)]);
+    // Flush the gesture recognizer's own internal timer so the test
+    // framework doesn't see it as still pending at teardown.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('リーチ選択中 ignores a tap on a tile that wouldn\'t keep the hand tenpai', (tester) async {
+    final riichiReadyHand = Hand(concealedTiles: [
+      pin(1), pin(2), pin(3),
+      pin(4), pin(5), pin(6),
+      pin(7), pin(8), pin(9),
+      DragonTile(Dragon.white), DragonTile(Dragon.white),
+      sou(4), sou(5),
+    ]);
+    final hands = [
+      riichiReadyHand,
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([man(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('リーチ'));
+    await tester.pump();
+
+    await tester.tap(find.text('1p'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('1p'));
+    await tester.pump();
+
+    expect(state.riichiDeclared, isEmpty);
+    expect(state.discardPiles[0], isEmpty);
+    expect(find.text('リーチ選択中（キャンセル）'), findsOneWidget); // still picking.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('暗槓 appears with 4 matching concealed tiles and declares an ankan', (tester) async {
+    final hands = [
+      Hand(concealedTiles: [pin(1), pin(1), pin(1), pin(1), ...filler(sou, 3, 9)]),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([man(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('暗槓'), findsOneWidget);
+    await tester.tap(find.text('暗槓'));
+    await tester.pump();
+
+    expect(state.hands[0].melds, hasLength(1));
+    expect(state.hands[0].melds.single.kind, MeldKind.kantsu);
+    expect(state.hands[0].melds.single.source, CallSource.ankan);
+  });
+
+  testWidgets('加槓 appears with a concealed tile matching an existing pon and upgrades it', (tester) async {
+    final hands = [
+      Hand(
+        concealedTiles: [pin(1), ...filler(sou, 3, 9)],
+        melds: [
+          Meld.kotsu(
+            [DragonTile(Dragon.white), DragonTile(Dragon.white), DragonTile(Dragon.white)],
+            source: CallSource.pon,
+          ),
+        ],
+      ),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([DragonTile(Dragon.white), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('加槓'), findsOneWidget);
+    await tester.tap(find.text('加槓'));
+    await tester.pump();
+
+    expect(state.hands[0].melds, hasLength(1));
+    expect(state.hands[0].melds.single.kind, MeldKind.kantsu);
+    expect(state.hands[0].melds.single.source, CallSource.shouminkan);
+  });
+
+  testWidgets('a CPU declares riichi when its chosen discard would keep it tenpai', (tester) async {
+    final cpuRiichiReadyHand = Hand(concealedTiles: [
+      pin(1), pin(2), pin(3),
+      pin(4), pin(5), pin(6),
+      pin(7), pin(8), pin(9),
+      DragonTile(Dragon.white), DragonTile(Dragon.white),
+      sou(4), sou(5),
+    ]);
+    final hands = [
+      Hand(concealedTiles: filler(man, 1, 13)),
+      cpuRiichiReadyHand,
+      Hand(concealedTiles: filler(sou, 3, 13)),
+    ];
+    final wall = Wall([man(1), man(9), sou(9), pin(1), pin(1)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    await tester.tap(find.text('1m').first);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('1m').first);
+    await tester.pump();
+
+    expect(state.riichiDeclared, contains(1));
+    expect(state.discardPiles[1], contains(man(9)));
+    // Flush the gesture recognizer's own internal timer so the test
+    // framework doesn't see it as still pending at teardown.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('drawing a hana auto-nuku\'s it, never entering the hand', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),

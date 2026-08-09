@@ -409,6 +409,36 @@ class GameState {
     _finishDiscard(tile);
   }
 
+  bool _isTenpaiAfterDiscarding(Tile tile) {
+    final afterDiscard = _handAfterDiscard(tile);
+    return kokushiShanten(afterDiscard) == 0 ||
+        chiitoitsuShanten(afterDiscard) == 0 ||
+        standardShanten(afterDiscard) == 0;
+  }
+
+  /// Whether the current player could declare riichi on *some* discard
+  /// right now — a menzen hand, not already riichi, with at least one
+  /// concealed tile whose removal leaves it tenpai. A caller building a
+  /// "リーチ" button can gate it on this, then check [canDeclareRiichiWith]
+  /// per tile to know which ones are actually valid to riichi-discard.
+  bool get canDeclareRiichi {
+    if (phase != TurnPhase.awaitingDiscard) return false;
+    if (riichiDeclared.contains(currentPlayerIndex)) return false;
+    if (!currentHand.isMenzen) return false;
+    return currentHand.concealedTiles
+        .any((tile) => tile is! KitaTile && tile is! HanaTile && _isTenpaiAfterDiscarding(tile));
+  }
+
+  /// Whether the current player could declare riichi specifically by
+  /// discarding [tile] right now.
+  bool canDeclareRiichiWith(Tile tile) {
+    if (phase != TurnPhase.awaitingDiscard) return false;
+    if (riichiDeclared.contains(currentPlayerIndex)) return false;
+    if (!currentHand.isMenzen) return false;
+    if (tile is KitaTile || tile is HanaTile) return false;
+    return _isTenpaiAfterDiscarding(tile);
+  }
+
   /// The current player declares riichi and discards [tile] in the same
   /// action. Requires a menzen hand that is tenpai *after* the discard.
   void declareRiichiAndDiscard(Tile tile) {
@@ -425,11 +455,7 @@ class GameState {
     if (riichiDeclared.contains(currentPlayerIndex)) {
       throw StateError('already riichi');
     }
-    final afterDiscard = _handAfterDiscard(tile);
-    final isTenpai = kokushiShanten(afterDiscard) == 0 ||
-        chiitoitsuShanten(afterDiscard) == 0 ||
-        standardShanten(afterDiscard) == 0;
-    if (!isTenpai) {
+    if (!_isTenpaiAfterDiscarding(tile)) {
       throw StateError('hand is not tenpai after discarding $tile');
     }
     riichiDeclared.add(currentPlayerIndex);
