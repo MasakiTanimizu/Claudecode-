@@ -1,0 +1,50 @@
+name: Deploy web to GitHub Pages
+
+on:
+  push:
+    branches:
+      - claude/three-player-mahjong-app-hsby7p
+    paths:
+      - "apps/mobile/**"
+      - "packages/mahjong_engine/**"
+      - "packages/shared_protocol/**"
+      - ".github/workflows/mobile-pages-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+        working-directory: apps/mobile
+      # --base-href matches this repo's GitHub Pages project-site path
+      # (https://<owner>.github.io/Claudecode-/) so asset URLs resolve
+      # correctly when served from a subpath instead of a domain root.
+      - run: flutter build web --base-href /Claudecode-/
+        working-directory: apps/mobile
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/mobile/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
