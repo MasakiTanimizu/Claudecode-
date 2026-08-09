@@ -31,7 +31,7 @@ void main() {
     expect(find.textContaining('プレイヤー0（親）'), findsOneWidget);
   });
 
-  testWidgets('the draw button lets the viewer draw on their own turn', (tester) async {
+  testWidgets('the viewer draws automatically on their own turn, with no manual button', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
       Hand(concealedTiles: filler(sou, 3, 13)),
@@ -42,10 +42,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
 
-    expect(find.text('ツモ'), findsOneWidget);
-    await tester.tap(find.text('ツモ'));
-    await tester.pump();
-
+    expect(find.text('ツモ'), findsNothing);
     expect(state.phase, TurnPhase.awaitingDiscard);
     expect(state.hands[0].concealedTiles, hasLength(14));
   });
@@ -89,8 +86,6 @@ void main() {
     final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.tap(find.text('ツモ'));
-    await tester.pump();
 
     expect(find.text('和了'), findsOneWidget);
     await tester.tap(find.text('和了'));
@@ -110,8 +105,6 @@ void main() {
     final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.tap(find.text('ツモ'));
-    await tester.pump();
 
     expect(find.textContaining('北を引きました'), findsOneWidget);
     expect(find.text('抜く'), findsOneWidget);
@@ -136,8 +129,6 @@ void main() {
     final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.tap(find.text('ツモ'));
-    await tester.pump();
     await tester.tap(find.text('残す'));
     await tester.pump();
 

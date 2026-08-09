@@ -7,12 +7,14 @@ import '../widgets/hand_view.dart';
 import '../widgets/mahjong_table_view.dart';
 
 /// One player's view of a live [GameState] (STEP7「対局画面」), interactive
-/// for the viewer's own turn: draw, double-tap a tile to discard, declare
-/// tsumo when available, and resolve a drawn kita (抜く/残す) when one comes
-/// up. The other two players are driven locally by the tile-efficiency CPU
-/// baseline (`ai/heuristic_discard.dart` and `ai/kita_decision.dart`) right
-/// after the viewer's discard, so a full round actually plays out. Hana
-/// tiles never reach here as a decision — [GameState] auto-nuku's them.
+/// for the viewer's own turn: the viewer's draw happens automatically (no
+/// manual "ツモ" button — drawing carries no decision, unlike discarding),
+/// then they double-tap a tile to discard, declare tsumo when available, or
+/// resolve a drawn kita (抜く/残す) when one comes up. The other two players
+/// are driven locally by the tile-efficiency CPU baseline
+/// (`ai/heuristic_discard.dart` and `ai/kita_decision.dart`) right after the
+/// viewer's discard, so a full round actually plays out. Hana tiles never
+/// reach here as a decision — [GameState] auto-nuku's them.
 ///
 /// Still out of scope here: riichi, ron, pon, kan, and any wait-tile
 /// highlighting — the viewer can only draw/discard/tsumo/kita-decide for
@@ -33,8 +35,21 @@ const _cpuKitaDifficulty = CpuDifficulty.intermediate;
 class _GameScreenState extends State<GameScreen> {
   GameState get _state => widget.state;
 
-  void _draw() {
-    setState(_state.drawForCurrentPlayer);
+  @override
+  void initState() {
+    super.initState();
+    _autoDrawForViewerIfNeeded();
+  }
+
+  /// Draws for the viewer with no button press needed, the moment it's
+  /// their turn and nothing else is pending — a draw carries no decision,
+  /// so there's nothing for the viewer to choose before it happens.
+  void _autoDrawForViewerIfNeeded() {
+    if (!_state.isOver &&
+        _state.currentPlayerIndex == widget.viewerIndex &&
+        _state.phase == TurnPhase.awaitingDraw) {
+      _state.drawForCurrentPlayer();
+    }
   }
 
   void _nukiKita() {
@@ -49,6 +64,7 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       _state.discard(tile);
       _runCpuTurns();
+      _autoDrawForViewerIfNeeded();
     });
   }
 
@@ -102,7 +118,6 @@ class _GameScreenState extends State<GameScreen> {
   Widget build(BuildContext context) {
     final view = buildPlayerView(_state, viewerIndex: widget.viewerIndex);
     final isViewerTurn = !_state.isOver && _state.currentPlayerIndex == widget.viewerIndex;
-    final canDraw = isViewerTurn && _state.phase == TurnPhase.awaitingDraw;
     final canDiscard = isViewerTurn && _state.phase == TurnPhase.awaitingDiscard;
     final canTsumo = canDiscard && _state.canDeclareTsumo();
     final pendingKitaTile = isViewerTurn ? _state.pendingKitaTile : null;
@@ -151,7 +166,6 @@ class _GameScreenState extends State<GameScreen> {
               children: [
                 const Text('自分の手牌', style: TextStyle(fontWeight: FontWeight.bold)),
                 const Spacer(),
-                if (canDraw) ElevatedButton(onPressed: _draw, child: const Text('ツモ')),
                 if (canTsumo) ...[
                   const SizedBox(width: 8),
                   ElevatedButton(onPressed: _declareTsumo, child: const Text('和了')),
