@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mahjong_engine/mahjong_engine.dart';
@@ -95,7 +97,7 @@ void main() {
     expect(find.textContaining('ツモ和了'), findsOneWidget);
   });
 
-  testWidgets('drawing a hana auto-nuku\'s it and announces which one via SnackBar', (tester) async {
+  testWidgets('drawing a hana auto-nuku\'s it, never entering the hand', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
       Hand(concealedTiles: filler(sou, 3, 13)),
@@ -105,40 +107,9 @@ void main() {
     final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.pump(); // let the postFrameCallback fire.
 
     expect(state.nukiTiles[0], [const HanaTile(HanaKind.summer)]);
     expect(state.currentHand.concealedTiles, isNot(contains(const HanaTile(HanaKind.summer))));
-    expect(find.textContaining('自分が夏を抜きました'), findsOneWidget);
-
-    // Flush the SnackBar's own timer so the test framework doesn't see it
-    // as still pending at teardown.
-    await tester.pump(const Duration(seconds: 3));
-  });
-
-  testWidgets('nuki tiles already present when the screen mounts are still announced on the first frame', (tester) async {
-    // Simulates what GameState.deal() leaves behind before GameScreen ever
-    // exists (e.g. an auto-nuku'd haipai hana) — the announcement has to
-    // compare against a zero baseline, not whatever nukiTiles already
-    // holds at mount, or these go unannounced entirely (STEP7フィードバック
-    // 改善: 0巡目でも表示されるように).
-    final hands = [
-      Hand(concealedTiles: filler(pin, 3, 13)),
-      Hand(concealedTiles: filler(sou, 3, 13)),
-      Hand(concealedTiles: filler(man, 1, 13)),
-    ];
-    final wall = Wall([pin(9), pin(2), pin(2)]);
-    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
-    state.nukiTiles[2].add(const HanaTile(HanaKind.summer));
-
-    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.pump(); // let the postFrameCallback fire.
-
-    expect(find.textContaining('プレイヤー2が夏を抜きました'), findsOneWidget);
-
-    // Flush the SnackBar's own timer so the test framework doesn't see it
-    // as still pending at teardown.
-    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('a CPU\'s kita decision already pending at mount (e.g. from haipai) resolves silently before the viewer sees it', (tester) async {
@@ -154,15 +125,49 @@ void main() {
     expect(state.currentPlayerIndex, 1);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
-    await tester.pump(); // let the postFrameCallback fire.
 
     expect(state.hasPendingKitaDecision, isFalse);
     expect(find.text('抜く'), findsNothing);
+  });
 
-    // The CPU heuristic nuku'd it (a mono-suit filler hand isn't
-    // terminal/honor-heavy enough for the intermediate difficulty to keep
-    // it), which fired a SnackBar — flush its timer.
-    await tester.pump(const Duration(seconds: 3));
+  testWidgets('resolving the viewer\'s own haipai kita never leaves the game stuck on a CPU\'s pending one', (tester) async {
+    // Every tile is a kita, so every player (viewer included) is
+    // guaranteed a haipai kita decision — a small, adversarial fixture
+    // that reliably exercises GameState's dealer-first, one-player-at-a-
+    // time sweep across all 3 seats, including the CPUs' portions
+    // GameScreen has to auto-resolve without ever leaving the viewer with
+    // nothing to press (regression test: resolving the viewer's own
+    // haipai kita used to leave the sweep paused on a CPU's turn with no
+    // UI for it and nothing left to move it forward — the game just
+    // stopped).
+    final fullSet = List.generate(80, (_) => const KitaTile());
+    final state = GameState.deal(
+      fullTileSet: fullSet,
+      playerCount: 3,
+      random: Random(0),
+      dealerIndex: 0,
+    );
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    expect(find.text('抜く'), findsOneWidget); // the viewer's own haipai kita.
+
+    for (var guard = 0; guard < 25; guard++) {
+      final keepButton = find.text('キャンセル');
+      if (keepButton.evaluate().isEmpty) break;
+      await tester.tap(keepButton);
+      await tester.pump();
+
+      final stuck = !state.isOver && state.currentPlayerIndex != 0;
+      expect(
+        stuck,
+        isFalse,
+        reason: 'stuck on player ${state.currentPlayerIndex} (phase ${state.phase}) '
+            'with nothing for the viewer to press',
+      );
+    }
+
+    expect(find.text('抜く'), findsNothing);
+    expect(state.phase, TurnPhase.awaitingDiscard);
   });
 
   testWidgets('drawing a kita shows the nuku/keep choice, and 抜く draws a replacement', (tester) async {
@@ -186,9 +191,6 @@ void main() {
     expect(state.phase, TurnPhase.awaitingDiscard);
     expect(state.nukiTiles[0], [const KitaTile()]);
     expect(find.text('9p'), findsOneWidget);
-    // 抜く just fired a SnackBar announcing it; let its timer run out so the
-    // test framework doesn't see it as still pending at teardown.
-    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('a discard the viewer can ron on offers ロン and ends the round on tap', (tester) async {

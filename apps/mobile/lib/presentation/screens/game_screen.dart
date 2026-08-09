@@ -26,18 +26,13 @@ import '../widgets/mahjong_table_view.dart';
 /// [_declineReaction]); declining (or not being able to react at all)
 /// resumes the normal flow.
 ///
-/// Every hana/kita auto-nuku'd by any player — which otherwise happens
-/// silently inside [GameState], invisible frame-to-frame — pops a SnackBar
-/// naming the tile the instant it happens (STEP7フィードバック改善: 何が
-/// 起きたか分かるように), on top of the persistent per-player 抜き牌 list
-/// already shown on the table. That includes whatever happens during the
-/// very first frame (the initial deal, and any haipai kita the CPUs
-/// resolve before the viewer even sees the board).
-///
-/// Still out of scope here: riichi, ankan/shouminkan reactions, and any
-/// wait-tile highlighting — the CPU stand-ins never riichi/call/ron
-/// either (STEP8's fuller decision flow layers on top of this same loop
-/// in a later slice).
+/// Still out of scope here: riichi, ankan/shouminkan reactions, any
+/// wait-tile highlighting, and any visible animation for a hana/kita
+/// being nuku'd (each player's own 抜き牌 list on the table is the only
+/// record for now — a real "revealed live" animation is worth doing once
+/// there's real tile art to animate, not urgent before then) — the CPU
+/// stand-ins never riichi/call/ron either (STEP8's fuller decision flow
+/// layers on top of this same loop in a later slice).
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
@@ -65,20 +60,14 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
-    // Can't setState this early (the element isn't mounted yet) — mutate
-    // directly, since the very first build() already reads fresh state,
-    // and defer the SnackBar until a frame has actually gone up. The
-    // baseline is all-zeros, not _nukiCounts() — GameState.deal() already
-    // ran (and may already have nuku'd hana, or be sitting on a haipai
-    // kita decision) before this screen ever existed, and every one of
-    // those events is still new *to this screen*.
-    final before = List<int>.filled(_state.nukiTiles.length, 0);
     // The one-time, dealer-first haipai kita sweep GameState.deal() already
     // ran and may be paused on any player, viewer included — resolve
-    // whichever CPUs come first in it, same as mid-round.
+    // whichever CPUs come first in it, same as mid-round, before drawing
+    // for the viewer if it's already their turn. Can't setState this
+    // early (the element isn't mounted yet) — mutate directly, since the
+    // very first build() already reads fresh state.
     _resolveKitaDecisionsForCpu();
     _autoDrawForViewerIfNeeded();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _announceNewNuki(before));
   }
 
   /// Draws for the viewer with no button press needed, the moment it's
@@ -92,43 +81,33 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
-  /// Runs [action] as a [setState] and, if it caused any player's hana/kita
-  /// to get auto-nuku'd along the way, announces each one via a SnackBar —
-  /// otherwise a hana quietly vanishing off the top of the wall (or a kita
-  /// nuku'd mid CPU-turn-chain) is easy to miss entirely.
-  void _runStateChange(void Function() action) {
-    final before = _nukiCounts();
-    setState(action);
-    _announceNewNuki(before);
-  }
-
-  List<int> _nukiCounts() => [for (final tiles in _state.nukiTiles) tiles.length];
-
-  void _announceNewNuki(List<int> before) {
-    if (!mounted) return;
-    final messages = <String>[];
-    for (var player = 0; player < _state.nukiTiles.length; player++) {
-      final newTiles = _state.nukiTiles[player].sublist(before[player]);
-      if (newTiles.isEmpty) continue;
-      final who = player == widget.viewerIndex ? '自分' : 'プレイヤー$player';
-      messages.add('$whoが${newTiles.map((t) => t.label).join('・')}を抜きました');
-    }
-    if (messages.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(messages.join(' / ')), duration: const Duration(seconds: 2)),
-    );
-  }
-
+  /// The viewer nuku's their own pending kita, then — same as
+  /// [initState] — resolves whatever CPU haipai kita the sweep moves on
+  /// to next, and draws for the viewer if the sweep lands back on them
+  /// with the round properly under way. Without this, resolving the
+  /// viewer's own haipai kita could leave the sweep paused on a CPU with
+  /// no UI shown for it (not the viewer's turn) and nothing left to move
+  /// it forward — the game would just stop.
   void _nukiKita() {
-    _runStateChange(_state.nukiKita);
+    setState(() {
+      _state.nukiKita();
+      _resolveKitaDecisionsForCpu();
+      _autoDrawForViewerIfNeeded();
+    });
   }
 
+  /// The keep-in-hand counterpart to [_nukiKita] — see its doc for why
+  /// this also has to keep the haipai sweep moving afterward.
   void _keepKita() {
-    _runStateChange(_state.keepDrawnKita);
+    setState(() {
+      _state.keepDrawnKita();
+      _resolveKitaDecisionsForCpu();
+      _autoDrawForViewerIfNeeded();
+    });
   }
 
   void _discard(Tile tile) {
-    _runStateChange(() {
+    setState(() {
       _state.discard(tile);
       _advanceAfterDiscard();
     });
@@ -155,19 +134,19 @@ class _GameScreenState extends State<GameScreen> {
       _declinedReactionPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
 
   void _ron() {
-    _runStateChange(() => _state.declareRon(widget.viewerIndex));
+    setState(() => _state.declareRon(widget.viewerIndex));
   }
 
   void _pon() {
-    _runStateChange(() => _state.declarePon(widget.viewerIndex));
+    setState(() => _state.declarePon(widget.viewerIndex));
   }
 
   void _kan() {
-    _runStateChange(() => _state.declareDaiminkan(widget.viewerIndex));
+    setState(() => _state.declareDaiminkan(widget.viewerIndex));
   }
 
   void _declineReaction() {
-    _runStateChange(() {
+    setState(() {
       _declinedReactionDiscarderIndex = _state.lastDiscarderIndex;
       _declinedReactionPileLength = _state.discardPiles[_state.lastDiscarderIndex].length;
       _advanceAfterDiscard();
@@ -175,7 +154,7 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _declareTsumo() {
-    _runStateChange(_state.declareTsumo);
+    setState(_state.declareTsumo);
   }
 
   /// Resolves pending kita decisions using the CPU heuristic
