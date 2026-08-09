@@ -18,23 +18,36 @@ void main() {
     expect(find.text('北'), findsOneWidget);
   });
 
-  testWidgets('a pin/sou number tile shows one pip per count, plus its label', (tester) async {
+  testWidgets('a pin number tile shows one dot per count, plus its label', (tester) async {
     await tester.pumpWidget(
       MaterialApp(home: TileView(NumberTile(NumberSuit.pin, 5))),
     );
 
     expect(find.text('5p'), findsOneWidget);
-    final wrap = tester.widget<Wrap>(find.byType(Wrap));
-    expect(wrap.children, hasLength(5));
+    expect(find.byType(PinDot), findsNWidgets(5));
+    expect(find.byType(Bamboo), findsNothing);
   });
 
-  testWidgets('a man tile (no pip pattern in this ruleset) renders as text only', (tester) async {
+  testWidgets('a sou number tile shows one bamboo bar per count, plus its label', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: TileView(NumberTile(NumberSuit.sou, 6))),
+    );
+
+    expect(find.text('6s'), findsOneWidget);
+    expect(find.byType(Bamboo), findsNWidgets(6));
+    expect(find.byType(PinDot), findsNothing);
+  });
+
+  testWidgets('a man tile renders a kanji numeral over 萬, plus its label', (tester) async {
     await tester.pumpWidget(
       MaterialApp(home: TileView(NumberTile(NumberSuit.man, 9))),
     );
 
     expect(find.text('9m'), findsOneWidget);
-    expect(find.byType(Wrap), findsNothing);
+    expect(find.text('九'), findsOneWidget);
+    expect(find.text('萬'), findsOneWidget);
+    expect(find.byType(PinDot), findsNothing);
+    expect(find.byType(Bamboo), findsNothing);
   });
 
   testWidgets('double-tap triggers onDiscard; a single tap does not', (tester) async {
