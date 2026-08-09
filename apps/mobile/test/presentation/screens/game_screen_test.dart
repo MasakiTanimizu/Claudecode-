@@ -99,4 +99,51 @@ void main() {
     expect(state.isOver, isTrue);
     expect(find.textContaining('ツモ和了'), findsOneWidget);
   });
+
+  testWidgets('drawing a kita shows the nuku/keep choice, and 抜く draws a replacement', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const KitaTile(), pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('ツモ'));
+    await tester.pump();
+
+    expect(find.textContaining('北を引きました'), findsOneWidget);
+    expect(find.text('抜く'), findsOneWidget);
+    expect(find.text('残す'), findsOneWidget);
+    expect(state.phase, TurnPhase.awaitingKitaDecision);
+
+    await tester.tap(find.text('抜く'));
+    await tester.pump();
+
+    expect(state.phase, TurnPhase.awaitingDiscard);
+    expect(state.nukiTiles[0], [const KitaTile()]);
+    expect(find.text('9p'), findsOneWidget);
+  });
+
+  testWidgets('drawing a kita and choosing 残す keeps it in the hand', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const KitaTile(), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('ツモ'));
+    await tester.pump();
+    await tester.tap(find.text('残す'));
+    await tester.pump();
+
+    expect(state.phase, TurnPhase.awaitingDiscard);
+    expect(state.nukiTiles[0], isEmpty);
+    expect(state.currentHand.concealedTiles, contains(const KitaTile()));
+    expect(find.text('北'), findsOneWidget);
+  });
 }

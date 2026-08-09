@@ -84,5 +84,20 @@ void main() {
       expect(view.riichiPlayers, {0});
       expect(view.discardPiles[0], [man(9)]);
     });
+
+    test('nuku\'d hana/kita tiles are public for every player', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([const HanaTile(HanaKind.spring), pin(9), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      state.drawForCurrentPlayer();
+
+      final view = buildPlayerView(state, viewerIndex: 1);
+      expect(view.nukiTiles[0], [const HanaTile(HanaKind.spring)]);
+    });
   });
 }

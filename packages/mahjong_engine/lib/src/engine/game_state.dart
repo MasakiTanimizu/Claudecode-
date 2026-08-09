@@ -22,6 +22,19 @@
 /// gives ron priority over pon/kan on the same discard, so check every
 /// player's ron eligibility first.
 ///
+/// Every draw (a normal turn draw or a kan replacement) transparently
+/// resolves 華牌 and 北 before the caller sees it (STEP5「抜きドラ体系」):
+/// a drawn hana tile is always immediately nuku'd (revealed into
+/// [nukiTiles] and replaced) with no choice offered, while a drawn kita
+/// pauses the state machine at [TurnPhase.awaitingKitaDecision] for the
+/// caller to resolve via [nukiKita] or [keepDrawnKita] — except for a
+/// player who has already declared riichi, whose locked hand has no route
+/// to keep an extra tile, so their kita is always auto-nuku'd like hana.
+/// A kita that's kept in hand can never be discarded ([discard] and
+/// [declareRiichiAndDiscard] both reject it), matching STEP5's "北は誰の
+/// 手からも捨てられない". Neither hana nor kita nuki reveals a dora
+/// indicator — only 槓 does that.
+///
 /// A hand is judged winnable using the same yaku detectors as the rest of
 /// `engine/` (`yaku.dart`, `standard_yaku.dart`), with one addition: a
 /// player who has declared riichi is always treated as having a yaku (立直
@@ -40,7 +53,7 @@ import 'standard_shanten.dart';
 import 'standard_yaku.dart';
 import 'yaku.dart';
 
-enum TurnPhase { awaitingDraw, awaitingDiscard, roundOver }
+enum TurnPhase { awaitingDraw, awaitingDiscard, awaitingKitaDecision, roundOver }
 
 enum RoundOverReason { tsumo, ron, exhaustiveDraw }
 
@@ -64,6 +77,13 @@ class GameState {
   final List<Hand> hands;
   final Wall wall;
   final List<List<Tile>> discardPiles;
+
+  /// Every hana tile and every nuku'd kita tile, indexed by the player who
+  /// nuku'd it — public information, revealed the instant it happens
+  /// (STEP5「抜きドラ体系」: "即座に公開・補充"). A kita a player chose to
+  /// keep in hand instead does *not* appear here.
+  final List<List<Tile>> nukiTiles;
+
   final int dealerIndex;
   final Set<int> riichiDeclared = {};
 
@@ -72,8 +92,13 @@ class GameState {
   RoundResult? result;
   Tile? _drawnTile;
 
+  /// The kita tile just drawn, awaiting [nukiKita] or [keepDrawnKita] —
+  /// only non-null while [phase] is [TurnPhase.awaitingKitaDecision].
+  Tile? _pendingKitaTile;
+
   GameState({required this.hands, required this.wall, required this.dealerIndex})
       : discardPiles = List.generate(hands.length, (_) => <Tile>[]),
+        nukiTiles = List.generate(hands.length, (_) => <Tile>[]),
         currentPlayerIndex = dealerIndex,
         phase = TurnPhase.awaitingDraw;
 
@@ -104,15 +129,74 @@ class GameState {
   }
 
   /// The current player draws the next tile, or ends the round as an
-  /// exhaustive draw (流局) if the wall has run out (STEP5「崖」).
+  /// exhaustive draw (流局) if the wall has run out (STEP5「崖」). May leave
+  /// [phase] at [TurnPhase.awaitingKitaDecision] instead of
+  /// [TurnPhase.awaitingDiscard] — see [_resolveNextDraw].
   void drawForCurrentPlayer() {
     _requirePhase(TurnPhase.awaitingDraw);
-    if (wall.isExhausted) {
-      phase = TurnPhase.roundOver;
-      result = const RoundResult(reason: RoundOverReason.exhaustiveDraw);
+    _resolveNextDraw();
+  }
+
+  /// Draws tiles for [currentPlayerIndex] one at a time, transparently
+  /// nuku'ing every hana tile and (unless the player is riichi'd) pausing
+  /// on the first kita tile — see the class doc for the full rule. Ends
+  /// the round as an exhaustive draw if the wall runs out mid-loop.
+  void _resolveNextDraw() {
+    while (true) {
+      if (wall.isExhausted) {
+        phase = TurnPhase.roundOver;
+        result = const RoundResult(reason: RoundOverReason.exhaustiveDraw);
+        return;
+      }
+      final tile = wall.draw();
+      if (tile is HanaTile) {
+        nukiTiles[currentPlayerIndex].add(tile);
+        continue;
+      }
+      if (tile is KitaTile && !riichiDeclared.contains(currentPlayerIndex)) {
+        _pendingKitaTile = tile;
+        phase = TurnPhase.awaitingKitaDecision;
+        return;
+      }
+      if (tile is KitaTile) {
+        // Riichi'd hand is locked — no route to keep an extra tile.
+        nukiTiles[currentPlayerIndex].add(tile);
+        continue;
+      }
+      _drawnTile = tile;
+      hands[currentPlayerIndex] = Hand(
+        concealedTiles: [...currentHand.concealedTiles, tile],
+        melds: currentHand.melds,
+      );
+      phase = TurnPhase.awaitingDiscard;
       return;
     }
-    final tile = wall.draw();
+  }
+
+  /// Whether the current player has a kita tile awaiting [nukiKita] or
+  /// [keepDrawnKita].
+  bool get hasPendingKitaDecision => phase == TurnPhase.awaitingKitaDecision;
+
+  /// The kita tile awaiting a decision — only non-null while
+  /// [hasPendingKitaDecision] is true.
+  Tile? get pendingKitaTile => _pendingKitaTile;
+
+  /// The current player reveals (nuku's) the kita tile they just drew,
+  /// then draws again (STEP5「北」: "抜く（即座に公開・補充）").
+  void nukiKita() {
+    _requirePhase(TurnPhase.awaitingKitaDecision);
+    nukiTiles[currentPlayerIndex].add(_pendingKitaTile!);
+    _pendingKitaTile = null;
+    _resolveNextDraw();
+  }
+
+  /// The current player keeps the kita tile they just drew in their
+  /// concealed hand instead of nuku'ing it. From here it can never be
+  /// discarded (STEP5「北」) — it stays until the round ends.
+  void keepDrawnKita() {
+    _requirePhase(TurnPhase.awaitingKitaDecision);
+    final tile = _pendingKitaTile!;
+    _pendingKitaTile = null;
     _drawnTile = tile;
     hands[currentPlayerIndex] = Hand(
       concealedTiles: [...currentHand.concealedTiles, tile],
@@ -162,9 +246,13 @@ class GameState {
 
   /// The current player discards [tile]. If they've already declared
   /// riichi, [tile] must be the one they just drew — a riichi hand stays
-  /// locked (STEP5 default riichi behavior).
+  /// locked (STEP5 default riichi behavior). A kita kept in hand can never
+  /// be discarded (STEP5「北」).
   void discard(Tile tile) {
     _requirePhase(TurnPhase.awaitingDiscard);
+    if (tile is KitaTile) {
+      throw StateError('北 can never be discarded — nuku it or keep it until the round ends');
+    }
     if (riichiDeclared.contains(currentPlayerIndex) && tile != _drawnTile) {
       throw StateError('a riichi hand can only discard the tile just drawn');
     }
@@ -175,6 +263,9 @@ class GameState {
   /// action. Requires a menzen hand that is tenpai *after* the discard.
   void declareRiichiAndDiscard(Tile tile) {
     _requirePhase(TurnPhase.awaitingDiscard);
+    if (tile is KitaTile) {
+      throw StateError('北 can never be discarded — nuku it or keep it until the round ends');
+    }
     if (!currentHand.isMenzen) {
       throw StateError('cannot declare riichi with an open hand');
     }
@@ -275,8 +366,9 @@ class GameState {
 
   /// Reveals the next kan-dora indicator and draws a replacement tile for
   /// the current player (STEP5「崖」: mechanically identical to a normal
-  /// draw). Ends the round as an exhaustive draw if the live wall can't
-  /// cover both the reveal and the draw.
+  /// draw, so it resolves hana/kita the same way as [_resolveNextDraw]).
+  /// Ends the round as an exhaustive draw if the live wall can't cover both
+  /// the reveal and the draw.
   void _drawReplacementAfterKan() {
     if (wall.remainingLiveCount < 2) {
       phase = TurnPhase.roundOver;
@@ -284,13 +376,7 @@ class GameState {
       return;
     }
     wall.revealNextDoraIndicator();
-    final tile = wall.draw();
-    _drawnTile = tile;
-    hands[currentPlayerIndex] = Hand(
-      concealedTiles: [...hands[currentPlayerIndex].concealedTiles, tile],
-      melds: hands[currentPlayerIndex].melds,
-    );
-    phase = TurnPhase.awaitingDiscard;
+    _resolveNextDraw();
   }
 
   /// Whether the current player can declare ankan on 4 concealed copies of

@@ -357,6 +357,128 @@ void main() {
     });
   });
 
+  group('GameState kita/hana nuki', () {
+    test('a drawn hana tile is auto-nuku\'d and replaced, never entering the hand', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([const HanaTile(HanaKind.spring), pin(9), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      state.drawForCurrentPlayer();
+
+      expect(state.phase, TurnPhase.awaitingDiscard);
+      expect(state.currentHand.concealedTiles, hasLength(14));
+      expect(state.currentHand.concealedTiles, isNot(contains(const HanaTile(HanaKind.spring))));
+      expect(state.currentHand.concealedTiles.last, pin(9));
+      expect(state.nukiTiles[0], [const HanaTile(HanaKind.spring)]);
+    });
+
+    test('a drawn kita tile pauses at awaitingKitaDecision instead of entering the hand', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([const KitaTile(), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      state.drawForCurrentPlayer();
+
+      expect(state.phase, TurnPhase.awaitingKitaDecision);
+      expect(state.hasPendingKitaDecision, isTrue);
+      expect(state.pendingKitaTile, const KitaTile());
+      expect(state.currentHand.concealedTiles, hasLength(13));
+    });
+
+    test('nukiKita reveals the kita publicly and draws a replacement', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([const KitaTile(), pin(9), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+      state.drawForCurrentPlayer();
+
+      state.nukiKita();
+
+      expect(state.phase, TurnPhase.awaitingDiscard);
+      expect(state.nukiTiles[0], [const KitaTile()]);
+      expect(state.currentHand.concealedTiles, hasLength(14));
+      expect(state.currentHand.concealedTiles.last, pin(9));
+    });
+
+    test('keepDrawnKita keeps the tile in hand instead of nuku\'ing it', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([const KitaTile(), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+      state.drawForCurrentPlayer();
+
+      state.keepDrawnKita();
+
+      expect(state.phase, TurnPhase.awaitingDiscard);
+      expect(state.nukiTiles[0], isEmpty);
+      expect(state.currentHand.concealedTiles, hasLength(14));
+      expect(state.currentHand.concealedTiles, contains(const KitaTile()));
+    });
+
+    test('a kita kept in hand can never be discarded', () {
+      final hands = [
+        Hand(concealedTiles: filler(pin, 3, 13)),
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([const KitaTile(), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+      state.drawForCurrentPlayer();
+      state.keepDrawnKita();
+
+      expect(() => state.discard(const KitaTile()), throwsStateError);
+    });
+
+    test('a riichi\'d player\'s kita is always auto-nuku\'d, never pausing for a decision', () {
+      final riichiReadyHand = Hand(concealedTiles: [
+        ...run(pin, 1),
+        ...run(pin, 4),
+        ...run(pin, 7),
+        DragonTile(Dragon.white),
+        DragonTile(Dragon.white),
+        sou(4),
+        sou(5),
+      ]);
+      final hands = [
+        riichiReadyHand,
+        Hand(concealedTiles: filler(sou, 3, 13)),
+        Hand(concealedTiles: filler(man, 1, 13)),
+      ];
+      final wall = Wall([man(9), pin(9), sou(9), const KitaTile(), man(1), pin(2), pin(2)]);
+      final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+      state.drawForCurrentPlayer();
+      state.declareRiichiAndDiscard(man(9));
+      state.drawForCurrentPlayer();
+      state.discard(state.currentHand.concealedTiles.last); // p1 tsumogiri
+      state.drawForCurrentPlayer();
+      state.discard(state.currentHand.concealedTiles.last); // p2 tsumogiri
+
+      state.drawForCurrentPlayer(); // p0 draws the kita (auto-nuku'd), then man(1).
+
+      expect(state.phase, TurnPhase.awaitingDiscard);
+      expect(state.hasPendingKitaDecision, isFalse);
+      expect(state.nukiTiles[0], [const KitaTile()]);
+      expect(state.currentHand.concealedTiles, hasLength(14));
+      expect(state.currentHand.concealedTiles, isNot(contains(const KitaTile())));
+      state.discard(man(1)); // only the just-drawn tile is legal for a riichi hand.
+    });
+  });
+
   group('GameState.deal', () {
     test('deals a fresh, ready-to-play round', () {
       final fullSet = buildFullTileSet(markPreset: DoraMarkPreset.allRed);

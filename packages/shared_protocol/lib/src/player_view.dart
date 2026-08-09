@@ -31,6 +31,12 @@ class PlayerView {
   final List<int> concealedTileCounts;
 
   final List<List<Tile>> discardPiles;
+
+  /// Every player's nuku'd hana/kita tiles, indexed by player — always
+  /// public, revealed the instant they're nuku'd (see
+  /// `GameState.nukiTiles`'s own doc).
+  final List<List<Tile>> nukiTiles;
+
   final List<Tile> doraIndicators;
   final Set<int> riichiPlayers;
   final int currentPlayerIndex;
@@ -44,6 +50,7 @@ class PlayerView {
     required this.melds,
     required this.concealedTileCounts,
     required this.discardPiles,
+    required this.nukiTiles,
     required this.doraIndicators,
     required this.riichiPlayers,
     required this.currentPlayerIndex,
@@ -61,6 +68,7 @@ PlayerView buildPlayerView(GameState state, {required int viewerIndex}) {
     melds: [for (final hand in state.hands) hand.melds],
     concealedTileCounts: [for (final hand in state.hands) hand.concealedTiles.length],
     discardPiles: state.discardPiles,
+    nukiTiles: state.nukiTiles,
     doraIndicators: state.wall.doraIndicators,
     riichiPlayers: state.riichiDeclared,
     currentPlayerIndex: state.currentPlayerIndex,
