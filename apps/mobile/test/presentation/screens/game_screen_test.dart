@@ -95,6 +95,62 @@ void main() {
 
     expect(state.isOver, isTrue);
     expect(find.textContaining('ツモ和了'), findsOneWidget);
+    // Dealer tsumo, 七対子 (2翻/25符 — the fixed low-han table ignores fu):
+    // 2000 all.
+    expect(find.textContaining('2000点オール'), findsOneWidget);
+  });
+
+  testWidgets('a non-dealer\'s tsumo win shows separate payments for the dealer and the other opponent', (tester) async {
+    final tenpaiHand = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      Hand(concealedTiles: filler(sou, 3, 13)), // dealer (player0).
+      tenpaiHand, // player1, the winner.
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(9), pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+    state.drawForCurrentPlayer(); // player0 (dealer) draws and discards junk first.
+    state.discard(sou(9));
+
+    // The viewer is player1 here: they draw pin(7) automatically once it's
+    // their turn, completing the chiitoitsu hand.
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state, viewerIndex: 1)));
+
+    expect(find.text('和了'), findsOneWidget);
+    await tester.tap(find.text('和了'));
+    await tester.pump();
+
+    expect(state.isOver, isTrue);
+    // Non-dealer tsumo, 七対子 (2翻/25符 — fixed low-han table): both
+    // opponents pay 1000 regardless of whether they're the dealer.
+    expect(find.textContaining('プレイヤー0から1000点・プレイヤー2から1000点'), findsOneWidget);
+  });
+
+  testWidgets('a ron win shows the discarder\'s payment', (tester) async {
+    final chiitoitsuTenpai = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      chiitoitsuTenpai,
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+    ];
+    final wall = Wall([pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.drawForCurrentPlayer(); // player1 (CPU) draws 7p...
+    state.discard(pin(7)); // ...and discards it: the viewer can now ron.
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('ロン'));
+    await tester.pump();
+
+    expect(state.isOver, isTrue);
+    // Non-dealer ron, 七対子 (2翻/25符): 2000 points from the discarder.
+    expect(find.textContaining('2000点'), findsOneWidget);
   });
 
   testWidgets('リーチ then double-tapping a tenpai-preserving tile declares riichi', (tester) async {

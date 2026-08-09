@@ -30,13 +30,21 @@ import '../widgets/mahjong_table_view.dart';
 /// [_declineReaction]); declining (or not being able to react at all)
 /// resumes the normal flow.
 ///
+/// The result banner shown once the round ends also names the points —
+/// [_tryScoreWin] runs the win through `engine/scoring.dart`, except for a
+/// riichi-only win (立直 alone, no other yaku), which that module can't
+/// score yet; the banner just omits the point figure for that one case
+/// rather than guessing.
+///
 /// Still out of scope here: the CPU stand-ins never call (pon/kan/ron) on
 /// another player's discard, only riichi on their own turn; ankan/
 /// shouminkan as a reaction to someone else's discard/kan (槍槓) isn't
-/// modeled; and there's no wait-tile highlighting or visible animation for
-/// a hana/kita being nuku'd (each player's own 抜き牌 list on the table is
-/// the only record for now — worth animating once there's real tile art,
-/// not urgent before then).
+/// modeled; there's no running score across rounds or a "next round" flow
+/// — this screen only ever plays the one 局 it was dealt; and there's no
+/// wait-tile highlighting or visible animation for a hana/kita being
+/// nuku'd (each player's own 抜き牌 list on the table is the only record
+/// for now — worth animating once there's real tile art, not urgent
+/// before then).
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
@@ -262,11 +270,68 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   String _resultLabel(RoundResult result) => switch (result.reason) {
-        RoundOverReason.tsumo => '終局: プレイヤー${result.winnerIndex}のツモ和了',
-        RoundOverReason.ron =>
-          '終局: プレイヤー${result.winnerIndex}のロン和了（放銃: プレイヤー${result.dealtInIndex}）',
+        RoundOverReason.tsumo => _tsumoResultLabel(result.winnerIndex!),
+        RoundOverReason.ron => _ronResultLabel(result.winnerIndex!, result.dealtInIndex!),
         RoundOverReason.exhaustiveDraw => '終局: 流局',
       };
+
+  String _tsumoResultLabel(int winner) {
+    final base = '終局: プレイヤー$winnerのツモ和了';
+    // The drawn tile is already part of the hand by the time tsumo can be
+    // declared (GameState adds it on draw, before awaitingDiscard) — no
+    // reconstruction needed, unlike ron.
+    final points = _tryScoreWin(
+      _state.hands[winner],
+      winnerIsDealer: winner == _state.dealerIndex,
+      method: WinMethod.tsumo,
+    );
+    if (points == null) return base;
+    if (winner == _state.dealerIndex) {
+      return '$base（${points.tsumoDoubleShare}点オール）';
+    }
+    final others = [
+      for (var i = 0; i < _state.hands.length; i++)
+        if (i != winner) i,
+    ];
+    final dealerOpponent = _state.dealerIndex;
+    final otherOpponent = others.firstWhere((i) => i != dealerOpponent);
+    return '$base（プレイヤー$dealerOpponentから${points.tsumoDoubleShare}点・'
+        'プレイヤー$otherOpponentから${points.tsumoSingleShare}点）';
+  }
+
+  String _ronResultLabel(int winner, int dealtIn) {
+    final base = '終局: プレイヤー$winnerのロン和了（放銃: プレイヤー$dealtIn）';
+    // Unlike tsumo, GameState.declareRon never adds the discarded tile to
+    // the winner's hand (it stays a historical record in the discarder's
+    // pile) — score against a reconstructed complete hand instead.
+    final winningTile = _state.discardPiles[dealtIn].last;
+    final winnerHand = _state.hands[winner];
+    final completeHand = Hand(
+      concealedTiles: [...winnerHand.concealedTiles, winningTile],
+      melds: winnerHand.melds,
+    );
+    final points = _tryScoreWin(
+      completeHand,
+      winnerIsDealer: winner == _state.dealerIndex,
+      method: WinMethod.ron,
+    );
+    if (points == null) return base;
+    return '$base（${points.ronPayment}点）';
+  }
+
+  /// Computes the win's points via [calculateWinPoints], or null if this
+  /// module can't score it — the shape-only yaku detectors it's built on
+  /// don't cover a riichi-only win (立直 alone, no other yaku), the one
+  /// gap in an otherwise-exhaustive check ([GameState] itself already only
+  /// let tsumo/ron happen for a complete hand with *some* yaku, shape-based
+  /// or riichi).
+  WinPoints? _tryScoreWin(Hand hand, {required bool winnerIsDealer, required WinMethod method}) {
+    try {
+      return calculateWinPoints(hand: hand, winnerIsDealer: winnerIsDealer, method: method);
+    } on ArgumentError {
+      return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
