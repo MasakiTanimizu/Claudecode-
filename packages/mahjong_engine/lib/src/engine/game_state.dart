@@ -33,10 +33,17 @@
 /// A kita that's kept in hand can never be discarded ([discard] and
 /// [declareRiichiAndDiscard] both reject it), matching STEP5's "北は誰の
 /// 手からも捨てられない". Neither hana nor kita nuki reveals a dora
-/// indicator — only 槓 does that. [GameState.deal] separately resolves
-/// hana/kita dealt straight into a starting hand — see
-/// [_resolveHaipaiNukiTiles] for why a haipai kita never gets the
-/// keep-in-hand choice a drawn one does.
+/// indicator — only 槓 does that.
+///
+/// [GameState.deal] resolves hana/kita dealt straight into a starting hand
+/// (haipai) before the round's first real turn: every hana is auto-nuku'd
+/// exactly like a drawn one, but every kita gets the same [nukiKita]/
+/// [keepDrawnKita] choice a drawn one does — dealt-in tiles aren't
+/// special-cased into a forced outcome. Since haipai can hand multiple
+/// players a kita at once, this walks the table once starting from
+/// [dealerIndex], pausing at [TurnPhase.awaitingKitaDecision] for
+/// whichever player has one, same as mid-round — see
+/// [_advanceHaipaiKitaResolution].
 ///
 /// A hand is judged winnable using the same yaku detectors as the rest of
 /// `engine/` (`yaku.dart`, `standard_yaku.dart`), with one addition: a
@@ -99,6 +106,25 @@ class GameState {
   /// only non-null while [phase] is [TurnPhase.awaitingKitaDecision].
   Tile? _pendingKitaTile;
 
+  /// True while walking the table for haipai kita decisions, right after
+  /// [GameState.deal] — changes what [nukiKita]/[keepDrawnKita] do next
+  /// (see [_advanceHaipaiKitaResolution]) versus mid-round.
+  bool _resolvingHaipaiKita = false;
+
+  /// How many of each player's kita tiles — already sitting in their hand,
+  /// whether dealt straight into their haipai or drawn as a nuku'd haipai
+  /// kita's own replacement — are still awaiting a decision. Only non-null
+  /// while [_resolvingHaipaiKita] is true.
+  ///
+  /// [_advanceHaipaiKitaResolution] needs this because a kita a player
+  /// chose to *keep* goes right back into that same hand — indistinguishable
+  /// from a still-undecided one by looking at the hand alone, so scanning
+  /// hand contents for "any kita" would immediately re-offer the one that
+  /// was just kept, forever. This count is what actually tracks "still
+  /// needs deciding," independent of how many kita happen to be sitting in
+  /// the hand at any given moment.
+  List<int>? _pendingHaipaiKitaCount;
+
   GameState({required this.hands, required this.wall, required this.dealerIndex})
       : discardPiles = List.generate(hands.length, (_) => <Tile>[]),
         nukiTiles = List.generate(hands.length, (_) => <Tile>[]),
@@ -125,46 +151,95 @@ class GameState {
     return state;
   }
 
-  /// Nuku's every hana or kita tile dealt straight into a starting hand,
-  /// replacing each from the wall — dealing (unlike a mid-round tsumo)
-  /// isn't "drawing on your turn", so there's no natural point to hang a
-  /// keep-or-nuku choice off of, and juggling a pending decision per player
-  /// before the round even starts isn't worth it for what's otherwise a
-  /// straightforward "these can't be legally discarded either way" outcome.
-  /// A haipai kita is therefore always auto-nuku'd, unlike one drawn mid-
-  /// round via [nukiKita]/[keepDrawnKita]. Ends the round as an exhaustive
-  /// draw if the wall can't cover every replacement (vanishingly unlikely
-  /// at this ruleset's 116-tile set).
+  /// Auto-nuku's every hana dealt straight into a starting hand, replacing
+  /// each from the wall (kita is deliberately left alone here — see
+  /// [_advanceHaipaiKitaResolution], which is what this hands off to).
   void _resolveHaipaiNukiTiles() {
     for (var player = 0; player < hands.length; player++) {
-      final targetSize = hands[player].concealedTiles.length;
-      final keep = <Tile>[];
-      for (final tile in hands[player].concealedTiles) {
-        if (tile is HanaTile || tile is KitaTile) {
-          nukiTiles[player].add(tile);
-        } else {
-          keep.add(tile);
-        }
-      }
-      hands[player] = Hand(concealedTiles: keep, melds: hands[player].melds);
+      _replaceHanaInHand(player);
+      if (phase == TurnPhase.roundOver) return; // wall ran out mid-replacement.
+    }
+    _pendingHaipaiKitaCount = [
+      for (final hand in hands) hand.concealedTiles.whereType<KitaTile>().length,
+    ];
+    _resolvingHaipaiKita = true;
+    currentPlayerIndex = dealerIndex;
+    _advanceHaipaiKitaResolution();
+  }
 
-      while (hands[player].concealedTiles.length < targetSize) {
-        if (wall.isExhausted) {
-          phase = TurnPhase.roundOver;
-          result = const RoundResult(reason: RoundOverReason.exhaustiveDraw);
-          return;
-        }
-        final tile = wall.draw();
-        if (tile is HanaTile || tile is KitaTile) {
-          nukiTiles[player].add(tile);
-          continue;
-        }
-        hands[player] = Hand(
-          concealedTiles: [...hands[player].concealedTiles, tile],
-          melds: hands[player].melds,
-        );
+  /// Strips every hana tile out of [player]'s hand and replaces each from
+  /// the wall, chaining past any further hana the replacement draws turn
+  /// up. Ends the round as an exhaustive draw if the wall can't cover it.
+  void _replaceHanaInHand(int player) {
+    final targetSize = hands[player].concealedTiles.length;
+    final keep = <Tile>[];
+    for (final tile in hands[player].concealedTiles) {
+      if (tile is HanaTile) {
+        nukiTiles[player].add(tile);
+      } else {
+        keep.add(tile);
       }
     }
+    hands[player] = Hand(concealedTiles: keep, melds: hands[player].melds);
+
+    while (hands[player].concealedTiles.length < targetSize) {
+      _drawReplacementSkippingHana(player);
+      if (phase == TurnPhase.roundOver) return;
+    }
+  }
+
+  /// Draws exactly one replacement tile into [player]'s hand, silently
+  /// chaining past any hana (auto-nuku'd, no choice) until a non-hana tile
+  /// comes up. A kita drawn this way is left in the hand as an ordinary
+  /// tile — it's the caller's job to notice it (both
+  /// [_advanceHaipaiKitaResolution] and [_resolveNextDraw] do, each in
+  /// their own context). Ends the round as an exhaustive draw if the wall
+  /// runs out mid-chain.
+  void _drawReplacementSkippingHana(int player) {
+    while (true) {
+      if (wall.isExhausted) {
+        phase = TurnPhase.roundOver;
+        result = const RoundResult(reason: RoundOverReason.exhaustiveDraw);
+        return;
+      }
+      final tile = wall.draw();
+      if (tile is HanaTile) {
+        nukiTiles[player].add(tile);
+        continue;
+      }
+      hands[player] = Hand(
+        concealedTiles: [...hands[player].concealedTiles, tile],
+        melds: hands[player].melds,
+      );
+      return;
+    }
+  }
+
+  /// Finds the next player, starting from [currentPlayerIndex] and
+  /// wrapping around the table, who still has a kita awaiting a decision
+  /// per [_pendingHaipaiKitaCount] — pulls one out of their hand and
+  /// pauses at [TurnPhase.awaitingKitaDecision] for it, same as a
+  /// mid-round draw would. Once every player's count reaches zero, hands
+  /// off to the real first turn ([TurnPhase.awaitingDraw] for
+  /// [dealerIndex]).
+  void _advanceHaipaiKitaResolution() {
+    final pending = _pendingHaipaiKitaCount!;
+    for (var i = 0; i < hands.length; i++) {
+      final player = (currentPlayerIndex + i) % hands.length;
+      if (pending[player] <= 0) continue;
+      pending[player]--;
+      final concealed = List<Tile>.of(hands[player].concealedTiles);
+      concealed.removeAt(concealed.indexWhere((t) => t is KitaTile));
+      hands[player] = Hand(concealedTiles: concealed, melds: hands[player].melds);
+      currentPlayerIndex = player;
+      _pendingKitaTile = const KitaTile();
+      phase = TurnPhase.awaitingKitaDecision;
+      return;
+    }
+    _pendingHaipaiKitaCount = null;
+    _resolvingHaipaiKita = false;
+    currentPlayerIndex = dealerIndex;
+    phase = TurnPhase.awaitingDraw;
   }
 
   bool get isOver => phase == TurnPhase.roundOver;
@@ -230,28 +305,47 @@ class GameState {
   /// [hasPendingKitaDecision] is true.
   Tile? get pendingKitaTile => _pendingKitaTile;
 
-  /// The current player reveals (nuku's) the kita tile they just drew,
-  /// then draws again (STEP5「北」: "抜く（即座に公開・補充）").
+  /// The current player reveals (nuku's) the kita tile they just drew (or,
+  /// during haipai resolution, were dealt), then draws again (STEP5「北」:
+  /// "抜く（即座に公開・補充）") — or, if this is haipai, moves on to the
+  /// next player's own kita, if any. If that replacement draw is itself a
+  /// kita, it joins the same player's pending count rather than being
+  /// silently left undecided in their hand.
   void nukiKita() {
     _requirePhase(TurnPhase.awaitingKitaDecision);
-    nukiTiles[currentPlayerIndex].add(_pendingKitaTile!);
+    final player = currentPlayerIndex;
+    nukiTiles[player].add(_pendingKitaTile!);
     _pendingKitaTile = null;
-    _resolveNextDraw();
+    if (_resolvingHaipaiKita) {
+      _drawReplacementSkippingHana(player);
+      if (phase == TurnPhase.roundOver) return;
+      if (hands[player].concealedTiles.last is KitaTile) {
+        _pendingHaipaiKitaCount![player]++;
+      }
+      _advanceHaipaiKitaResolution();
+    } else {
+      _resolveNextDraw();
+    }
   }
 
-  /// The current player keeps the kita tile they just drew in their
-  /// concealed hand instead of nuku'ing it. From here it can never be
-  /// discarded (STEP5「北」) — it stays until the round ends.
+  /// The current player keeps the kita tile they just drew (or were dealt)
+  /// in their concealed hand instead of nuku'ing it. From here it can
+  /// never be discarded (STEP5「北」) — it stays until the round ends.
   void keepDrawnKita() {
     _requirePhase(TurnPhase.awaitingKitaDecision);
+    final player = currentPlayerIndex;
     final tile = _pendingKitaTile!;
     _pendingKitaTile = null;
-    _drawnTile = tile;
-    hands[currentPlayerIndex] = Hand(
-      concealedTiles: [...currentHand.concealedTiles, tile],
-      melds: currentHand.melds,
+    hands[player] = Hand(
+      concealedTiles: [...hands[player].concealedTiles, tile],
+      melds: hands[player].melds,
     );
-    phase = TurnPhase.awaitingDiscard;
+    if (_resolvingHaipaiKita) {
+      _advanceHaipaiKitaResolution();
+    } else {
+      _drawnTile = tile;
+      phase = TurnPhase.awaitingDiscard;
+    }
   }
 
   bool _canWinWithYaku(int playerIndex, {required bool checkRiichi}) {

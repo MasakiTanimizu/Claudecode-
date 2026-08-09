@@ -10,12 +10,14 @@ import '../widgets/mahjong_table_view.dart';
 /// for the viewer's own turn: the viewer's draw happens automatically (no
 /// manual "ツモ" button — drawing carries no decision, unlike discarding),
 /// then they double-tap a tile to discard, declare tsumo when available, or
-/// resolve a drawn kita (抜く/キャンセル, i.e. keep it in hand) when one
-/// comes up. The other two players
-/// are driven locally by the tile-efficiency CPU baseline
-/// (`ai/heuristic_discard.dart` and `ai/kita_decision.dart`) right after the
-/// viewer's discard, so a full round actually plays out. Hana tiles never
-/// reach here as a decision — [GameState] auto-nuku's them.
+/// resolve a kita (抜く/キャンセル, i.e. keep it in hand) whenever one comes
+/// up — including any dealt straight into their opening hand, which
+/// [GameState] offers the exact same choice for as one drawn mid-round. The
+/// other two players are driven locally by the tile-efficiency CPU baseline
+/// (`ai/heuristic_discard.dart` and `ai/kita_decision.dart`), both mid-round
+/// and for their own haipai kita ([_resolveKitaDecisionsForCpu], also
+/// reused from [initState]). Hana tiles never reach here as a decision,
+/// haipai included — [GameState] always auto-nuku's them.
 ///
 /// Whenever another player's discard is one the viewer could ron, pon,
 /// and/or daiminkan, the game pauses right there — before the next player
@@ -28,7 +30,9 @@ import '../widgets/mahjong_table_view.dart';
 /// silently inside [GameState], invisible frame-to-frame — pops a SnackBar
 /// naming the tile the instant it happens (STEP7フィードバック改善: 何が
 /// 起きたか分かるように), on top of the persistent per-player 抜き牌 list
-/// already shown on the table.
+/// already shown on the table. That includes whatever happens during the
+/// very first frame (the initial deal, and any haipai kita the CPUs
+/// resolve before the viewer even sees the board).
 ///
 /// Still out of scope here: riichi, ankan/shouminkan reactions, and any
 /// wait-tile highlighting — the CPU stand-ins never riichi/call/ron
@@ -63,8 +67,16 @@ class _GameScreenState extends State<GameScreen> {
     super.initState();
     // Can't setState this early (the element isn't mounted yet) — mutate
     // directly, since the very first build() already reads fresh state,
-    // and defer the SnackBar until a frame has actually gone up.
-    final before = _nukiCounts();
+    // and defer the SnackBar until a frame has actually gone up. The
+    // baseline is all-zeros, not _nukiCounts() — GameState.deal() already
+    // ran (and may already have nuku'd hana, or be sitting on a haipai
+    // kita decision) before this screen ever existed, and every one of
+    // those events is still new *to this screen*.
+    final before = List<int>.filled(_state.nukiTiles.length, 0);
+    // The one-time, dealer-first haipai kita sweep GameState.deal() already
+    // ran and may be paused on any player, viewer included — resolve
+    // whichever CPUs come first in it, same as mid-round.
+    _resolveKitaDecisionsForCpu();
     _autoDrawForViewerIfNeeded();
     WidgetsBinding.instance.addPostFrameCallback((_) => _announceNewNuki(before));
   }
@@ -166,12 +178,14 @@ class _GameScreenState extends State<GameScreen> {
     _runStateChange(_state.declareTsumo);
   }
 
-  /// Resolves every pending kita decision for the current player using the
-  /// CPU heuristic (`ai/kita_decision.dart`). Only called for the CPU
-  /// stand-ins — the viewer instead gets an explicit UI choice via
-  /// [_nukiKita]/[_keepKita].
+  /// Resolves pending kita decisions using the CPU heuristic
+  /// (`ai/kita_decision.dart`), stopping the instant it's the viewer's own
+  /// turn to decide instead — their choice happens through the UI via
+  /// [_nukiKita]/[_keepKita]. Used both mid-round (from [_runCpuTurns],
+  /// where it's always already a CPU's turn) and for [initState]'s haipai
+  /// kita sweep (where it might be the viewer's from the very first tile).
   void _resolveKitaDecisionsForCpu() {
-    while (_state.hasPendingKitaDecision) {
+    while (_state.hasPendingKitaDecision && _state.currentPlayerIndex != widget.viewerIndex) {
       final hypotheticalHand = Hand(
         concealedTiles: [..._state.currentHand.concealedTiles, _state.pendingKitaTile!],
         melds: _state.currentHand.melds,

@@ -504,6 +504,12 @@ void main() {
         random: Random(1),
         dealerIndex: 2,
       );
+      // This particular seed/deal may or may not hand someone a haipai
+      // kita — resolve it deterministically either way before asserting
+      // the "ready to play" invariants below.
+      while (state.hasPendingKitaDecision) {
+        state.nukiKita();
+      }
 
       expect(state.hands, hasLength(3));
       for (final hand in state.hands) {
@@ -514,16 +520,17 @@ void main() {
       expect(state.phase, TurnPhase.awaitingDraw);
     });
 
-    test('hana/kita dealt straight into a starting hand (haipai) are auto-nuku\'d, never left discardable', () {
+    test('a hana dealt straight into a starting hand (haipai) is auto-nuku\'d, never left discardable', () {
       // A real 116-tile set has plenty of wall buffer (77 tiles after
-      // dealing) relative to the 12 hana+kita tiles it contains, so
-      // resolving every haipai special can never run the wall dry. Sweep
-      // several seeds: the core assertion (no hand ever holds a hana/kita
-      // tile) must hold for every one of them, and across enough seeds at
-      // least one is expected to actually deal a special tile into some
-      // hand, exercising the fix rather than passing vacuously.
+      // dealing) relative to the 6 hana it contains, so resolving every
+      // haipai hana can never run the wall dry. Sweep several seeds: the
+      // core assertion (no hand ever holds a hana tile, immediately after
+      // .deal() — hana resolves before any kita walk even starts) must
+      // hold for every one of them, and across enough seeds at least one
+      // is expected to actually deal a hana into some hand, exercising the
+      // fix rather than passing vacuously.
       final fullSet = buildFullTileSet(markPreset: DoraMarkPreset.allRed);
-      var totalNukiSpecials = 0;
+      var totalNukiHana = 0;
 
       for (var seed = 0; seed < 30; seed++) {
         final state = GameState.deal(
@@ -534,17 +541,81 @@ void main() {
         );
 
         for (final hand in state.hands) {
-          expect(hand.concealedTiles, hasLength(13));
           expect(hand.concealedTiles.whereType<HanaTile>(), isEmpty);
-          expect(hand.concealedTiles.whereType<KitaTile>(), isEmpty);
         }
-        totalNukiSpecials += state.nukiTiles
-            .expand((tiles) => tiles)
-            .where((t) => t is HanaTile || t is KitaTile)
-            .length;
+        totalNukiHana +=
+            state.nukiTiles.expand((tiles) => tiles).whereType<HanaTile>().length;
       }
 
-      expect(totalNukiSpecials, greaterThan(0));
+      expect(totalNukiHana, greaterThan(0));
+    });
+
+    test('a kita dealt straight into a starting hand (haipai) offers the same 抜く/keep choice a drawn one does', () {
+      // 42 tiles total: 39 get dealt (13×3), so the wall always ends up
+      // with exactly 3 — with 4 kita tiles and zero hana in the pool, at
+      // least 1 kita must land in some hand no matter how the shuffle
+      // falls (pigeonhole: the wall can only ever absorb 3 of the 4).
+      // Always choosing to *keep* every offered kita needs no wall draws
+      // at all, so this doesn't depend on the wall having any particular
+      // amount of spare capacity.
+      final fullSet = [
+        const KitaTile(),
+        const KitaTile(),
+        const KitaTile(),
+        const KitaTile(),
+        ...filler(pin, 1, 38),
+      ];
+      final state = GameState.deal(
+        fullTileSet: fullSet,
+        playerCount: 3,
+        random: Random(0),
+        dealerIndex: 0,
+      );
+
+      expect(state.hasPendingKitaDecision, isTrue);
+      while (state.hasPendingKitaDecision) {
+        expect(state.pendingKitaTile, const KitaTile());
+        state.keepDrawnKita();
+      }
+
+      expect(state.phase, TurnPhase.awaitingDraw);
+      expect(state.currentPlayerIndex, 0);
+      expect(state.nukiTiles.every((tiles) => tiles.isEmpty), isTrue);
+      var totalKeptKita = 0;
+      for (final hand in state.hands) {
+        expect(hand.concealedTiles, hasLength(13));
+        totalKeptKita += hand.concealedTiles.whereType<KitaTile>().length;
+      }
+      expect(totalKeptKita, greaterThanOrEqualTo(1));
+    });
+
+    test('choosing 抜く for a haipai kita reveals it and draws a replacement, same as mid-round', () {
+      // Real 116-tile deck: plenty of wall buffer for whatever replacement
+      // draws nuku'ing every offered kita ends up needing.
+      final fullSet = buildFullTileSet(markPreset: DoraMarkPreset.allRed);
+      var totalNukiKita = 0;
+
+      for (var seed = 0; seed < 30; seed++) {
+        final state = GameState.deal(
+          fullTileSet: fullSet,
+          playerCount: 3,
+          random: Random(seed),
+          dealerIndex: 0,
+        );
+        while (state.hasPendingKitaDecision) {
+          state.nukiKita();
+        }
+
+        expect(state.phase, TurnPhase.awaitingDraw);
+        for (final hand in state.hands) {
+          expect(hand.concealedTiles, hasLength(13));
+          expect(hand.concealedTiles.whereType<KitaTile>(), isEmpty);
+        }
+        totalNukiKita +=
+            state.nukiTiles.expand((tiles) => tiles).whereType<KitaTile>().length;
+      }
+
+      expect(totalNukiKita, greaterThan(0));
     });
   });
 }

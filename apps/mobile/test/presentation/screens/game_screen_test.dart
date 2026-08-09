@@ -116,6 +116,55 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
+  testWidgets('nuki tiles already present when the screen mounts are still announced on the first frame', (tester) async {
+    // Simulates what GameState.deal() leaves behind before GameScreen ever
+    // exists (e.g. an auto-nuku'd haipai hana) — the announcement has to
+    // compare against a zero baseline, not whatever nukiTiles already
+    // holds at mount, or these go unannounced entirely (STEP7フィードバック
+    // 改善: 0巡目でも表示されるように).
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.nukiTiles[2].add(const HanaTile(HanaKind.summer));
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.pump(); // let the postFrameCallback fire.
+
+    expect(find.textContaining('プレイヤー2が夏を抜きました'), findsOneWidget);
+
+    // Flush the SnackBar's own timer so the test framework doesn't see it
+    // as still pending at teardown.
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('a CPU\'s kita decision already pending at mount (e.g. from haipai) resolves silently before the viewer sees it', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const KitaTile(), pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.drawForCurrentPlayer(); // player1 (CPU) draws a kita — mimics a haipai pause.
+    expect(state.hasPendingKitaDecision, isTrue);
+    expect(state.currentPlayerIndex, 1);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.pump(); // let the postFrameCallback fire.
+
+    expect(state.hasPendingKitaDecision, isFalse);
+    expect(find.text('抜く'), findsNothing);
+
+    // The CPU heuristic nuku'd it (a mono-suit filler hand isn't
+    // terminal/honor-heavy enough for the intermediate difficulty to keep
+    // it), which fired a SnackBar — flush its timer.
+    await tester.pump(const Duration(seconds: 3));
+  });
+
   testWidgets('drawing a kita shows the nuku/keep choice, and 抜く draws a replacement', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),

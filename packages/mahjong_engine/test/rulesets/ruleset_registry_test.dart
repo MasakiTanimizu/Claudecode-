@@ -56,6 +56,13 @@ void main() {
 
     test('deal produces a ready-to-play 3-player round', () {
       final state = ruleset.deal(random: Random(1), dealerIndex: 1, config: const {});
+      // This particular seed may or may not deal someone a haipai kita —
+      // resolve it deterministically either way before asserting "ready
+      // to play" below.
+      while (state.hasPendingKitaDecision) {
+        state.nukiKita();
+      }
+
       expect(state.hands, hasLength(3));
       for (final hand in state.hands) {
         expect(hand.concealedTiles, hasLength(13));
