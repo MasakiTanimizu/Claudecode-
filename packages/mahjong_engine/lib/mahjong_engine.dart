@@ -3,6 +3,7 @@
 /// dependency here — see docs/design/01-tech-stack.md for why.
 library;
 
+export 'src/ai/call_decision.dart';
 export 'src/ai/danger.dart';
 export 'src/ai/danger_aware_discard.dart';
 export 'src/ai/difficulty.dart';

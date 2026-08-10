@@ -28,12 +28,17 @@ import '../widgets/tile_view.dart';
 /// tenpai. Hana tiles never reach here as a decision, haipai included —
 /// [GameState] always auto-nuku's them.
 ///
-/// Whenever another player's discard is one the viewer could ron, pon,
-/// and/or daiminkan, the game pauses right there — before the next player
-/// would otherwise draw — and offers whichever of ロン/ポン/カン apply plus
-/// a キャンセル to decline all of them ([_ron]/[_pon]/[_kan]/
-/// [_declineReaction]); declining (or not being able to react at all)
-/// resumes the normal flow.
+/// Whenever a discard is one another player could ron, pon, and/or
+/// daiminkan, [_resolveReactionsToLastDiscard] arbitrates by real mahjong's
+/// call priority ([_reactionPriorityOrder]: ロン beats ポン/カン, and among
+/// several eligible players whoever sits closest after the discarder gets
+/// first refusal). CPUs act on their own immediately — ロン is always
+/// taken, ポン/カン go through `ai/call_decision.dart`'s [shouldCall] — so
+/// the game only actually pauses (offering ロン/ポン/カン/キャンセル) when
+/// the *viewer* is the one with priority; declining (or having no reaction
+/// at all) resumes the normal flow. A CPU's call forces an immediate
+/// discard of their own, which can chain into further reactions the same
+/// way.
 ///
 /// The result banner shown once the round ends also names the points —
 /// [_tryScoreWin] runs the win through `engine/scoring.dart`, except for a
@@ -49,11 +54,10 @@ import '../widgets/tile_view.dart';
 /// visible as small badges next to their label on [MahjongTableView] for a
 /// lasting record, not just the transient popup.
 ///
-/// Still out of scope here: the CPU stand-ins never call (pon/kan/ron) on
-/// another player's discard, only riichi on their own turn; ankan/
-/// shouminkan as a reaction to someone else's discard/kan (槍槓) isn't
-/// modeled; there's no running score across rounds or a "next round" flow
-/// — this screen only ever plays the one 局 it was dealt; and there's no
+/// Still out of scope here: ankan/shouminkan as a reaction to someone
+/// else's discard/kan (槍槓) isn't modeled — only ロン/ポン/大明槓 are;
+/// there's no running score across rounds or a "next round" flow — this
+/// screen only ever plays the one 局 it was dealt; and there's no
 /// wait-tile highlighting or animation for a hana/kita tile itself moving
 /// out of the hand (just the popup/badges above) — worth animating once
 /// there's a reason to invest in it, not urgent before then.
@@ -67,7 +71,8 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-const _cpuKitaDifficulty = CpuDifficulty.intermediate;
+// Shared by every CPU decision (kita, and now pon/kan calls too).
+const _cpuDifficulty = CpuDifficulty.intermediate;
 
 class _GameScreenState extends State<GameScreen> {
   GameState get _state => widget.state;
@@ -224,12 +229,13 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// Advances the game past a discard that was just made (by the viewer or
-  /// a CPU) — unless the viewer can ron, pon, and/or daiminkan it and
-  /// hasn't already declined this exact discard, in which case this pauses
-  /// right here so the UI can offer ロン/ポン/カン/キャンセル instead of
-  /// silently moving on.
+  /// a CPU) — unless the viewer has a reaction to make on it (and hasn't
+  /// already declined), in which case this pauses right here so the UI can
+  /// offer ロン/ポン/カン/キャンセル instead of silently moving on. Any CPU
+  /// reactions along the way are resolved automatically first, inside
+  /// [_resolveReactionsToLastDiscard].
   void _advanceAfterDiscard() {
-    if (_viewerCanReactToLastDiscard() && !_viewerDeclinedCurrentReaction()) return;
+    if (_resolveReactionsToLastDiscard()) return;
     _runCpuTurns();
     _autoDrawForViewerIfNeeded();
   }
@@ -242,6 +248,110 @@ class _GameScreenState extends State<GameScreen> {
   bool _viewerDeclinedCurrentReaction() =>
       _declinedReactionDiscarderIndex == _state.lastDiscarderIndex &&
       _declinedReactionPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
+
+  /// The two non-discarder players, closest-in-turn-order first — real
+  /// mahjong's call priority order (STEP8「鳴きの優先順位」): whoever sits
+  /// right after the discarder gets first refusal on any given discard.
+  List<int> _reactionPriorityOrder() {
+    final discarder = _state.lastDiscarderIndex;
+    return [for (var offset = 1; offset < _state.hands.length; offset++) (discarder + offset) % _state.hands.length];
+  }
+
+  /// After any discard (viewer's or a CPU's), resolves whether either of
+  /// the other two players reacts to it: ロン always outranks ポン/カン,
+  /// and among multiple eligible players [_reactionPriorityOrder] decides
+  /// who gets it. A CPU acts immediately — ロン is always taken, ポン/カン
+  /// go through [shouldCall] — while the viewer's own eligibility just
+  /// pauses here so ロン/ポン/カン/キャンセル can be offered through the UI
+  /// (a キャンセル on any of them counts as declining all three for this
+  /// discard, same as [_viewerDeclinedCurrentReaction] already assumes). A
+  /// CPU's call forces an immediate discard of their own, which could draw
+  /// a fresh reaction in turn — this loops until nobody (viewer included)
+  /// has anything left to react to, or the round ends.
+  ///
+  /// Returns true if the caller should stop here (round over, or the
+  /// viewer has something to react to); false once nobody does, meaning
+  /// the normal turn flow (the next player's draw) can proceed.
+  bool _resolveReactionsToLastDiscard() {
+    while (true) {
+      if (_state.isOver) return true;
+      final priority = _reactionPriorityOrder();
+      final viewerAlreadyDeclined = _viewerDeclinedCurrentReaction();
+
+      for (final player in priority) {
+        if (player == widget.viewerIndex && viewerAlreadyDeclined) continue;
+        if (!_state.canDeclareRon(player)) continue;
+        if (player == widget.viewerIndex) return true; // ロン button handles it.
+        _state.declareRon(player);
+        return true;
+      }
+
+      int? callPlayer;
+      for (final player in priority) {
+        if (player == widget.viewerIndex) {
+          if (!viewerAlreadyDeclined &&
+              (_state.canDeclarePon(player) || _state.canDeclareDaiminkan(player))) {
+            return true; // ポン/カン button(s) handle it.
+          }
+          continue;
+        }
+        if (_state.canDeclareDaiminkan(player) || _state.canDeclarePon(player)) {
+          callPlayer = player;
+          break;
+        }
+      }
+      if (callPlayer == null) return false; // nobody left to react to this discard.
+
+      final calledTile = _state.discardPiles[_state.lastDiscarderIndex].last;
+      final handBeforeCall = _state.hands[callPlayer];
+      final canKan = _state.canDeclareDaiminkan(callPlayer);
+      final wantsKan = canKan &&
+          shouldCall(handBeforeCall, _hypotheticalDaiminkanHand(callPlayer, calledTile), _cpuDifficulty);
+      final canPon = !wantsKan && _state.canDeclarePon(callPlayer);
+      final wantsPon =
+          canPon && shouldCall(handBeforeCall, _hypotheticalPonHand(callPlayer, calledTile), _cpuDifficulty);
+
+      if (wantsKan) {
+        _trackHana(callPlayer, () => _state.declareDaiminkan(callPlayer));
+      } else if (wantsPon) {
+        _state.declarePon(callPlayer); // never itself draws.
+      } else {
+        return false; // eligible but not worth it — priority is spent either way.
+      }
+      if (_state.isOver) return true; // daiminkan's replacement draw could exhaust the wall.
+
+      // The caller now owes an immediate discard of their own (an opened
+      // hand can never riichi, so no riichi check here unlike _runCpuTurns).
+      _state.discard(chooseDiscard(_state.currentHand));
+      // Loop back around: this fresh discard might itself draw a reaction.
+    }
+  }
+
+  /// Mirrors [GameState.declarePon]'s own claiming logic to preview the
+  /// hand [player] would end up with by pon-ing [calledTile], without
+  /// mutating engine state — used only to feed [shouldCall].
+  Hand _hypotheticalPonHand(int player, Tile calledTile) {
+    final hand = _state.hands[player];
+    final concealed = List<Tile>.of(hand.concealedTiles);
+    final claimed = <Tile>[];
+    for (var i = concealed.length - 1; i >= 0 && claimed.length < 2; i--) {
+      if (concealed[i].tileKind == calledTile.tileKind) claimed.add(concealed.removeAt(i));
+    }
+    final meld = Meld.kotsu([...claimed, calledTile], source: CallSource.pon);
+    return Hand(concealedTiles: concealed, melds: [...hand.melds, meld]);
+  }
+
+  /// The 大明槓 counterpart to [_hypotheticalPonHand].
+  Hand _hypotheticalDaiminkanHand(int player, Tile calledTile) {
+    final hand = _state.hands[player];
+    final concealed = List<Tile>.of(hand.concealedTiles);
+    final claimed = <Tile>[];
+    for (var i = concealed.length - 1; i >= 0 && claimed.length < 3; i--) {
+      if (concealed[i].tileKind == calledTile.tileKind) claimed.add(concealed.removeAt(i));
+    }
+    final meld = Meld.kantsu([...claimed, calledTile], source: CallSource.daiminkan);
+    return Hand(concealedTiles: concealed, melds: [...hand.melds, meld]);
+  }
 
   void _ron() {
     setState(() {
@@ -293,7 +403,7 @@ class _GameScreenState extends State<GameScreen> {
         concealedTiles: [..._state.currentHand.concealedTiles, _state.pendingKitaTile!],
         melds: _state.currentHand.melds,
       );
-      if (shouldKeepDrawnKita(hypotheticalHand, _cpuKitaDifficulty)) {
+      if (shouldKeepDrawnKita(hypotheticalHand, _cpuDifficulty)) {
         _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
       } else {
         _trackHana(player, _state.nukiKita);
@@ -321,7 +431,7 @@ class _GameScreenState extends State<GameScreen> {
       } else {
         _state.discard(discardTile);
       }
-      if (_viewerCanReactToLastDiscard()) return; // pause for ロン/ポン/カン/キャンセル.
+      if (_resolveReactionsToLastDiscard()) return; // round over, or viewer has a reaction.
     }
   }
 

@@ -562,6 +562,62 @@ void main() {
     expect(state.discardPiles[1], [sou(9)]); // untouched — no pon was declared.
   });
 
+  testWidgets('a CPU auto-declares ron on the viewer\'s discard', (tester) async {
+    final chiitoitsuTenpai = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      Hand(concealedTiles: filler(sou, 3, 13)), // viewer/dealer: draws and discards 7p.
+      chiitoitsuTenpai, // CPU, waiting on 7p.
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(7), pin(8), pin(9)]); // 1 live draw (7p) + 2 reserved.
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    await tester.tap(find.text('7p'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('7p'));
+    await tester.pump();
+
+    expect(state.isOver, isTrue);
+    expect(state.result!.reason, RoundOverReason.ron);
+    expect(state.result!.winnerIndex, 1);
+    expect(state.result!.dealtInIndex, 0);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('a CPU auto-calls ポン on the viewer\'s discard when it helps their hand', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(sou, 3, 13)), // viewer/dealer: draws and discards 白.
+      Hand(concealedTiles: [
+        DragonTile(Dragon.white), DragonTile(Dragon.white),
+        pin(1), pin(3), pin(5), pin(7), pin(9),
+        sou(2), sou(4), sou(6), sou(8),
+        man(1), man(9),
+      ]), // CPU: an isolated pair the pon turns into a real group.
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([DragonTile(Dragon.white), pin(2), pin(3), pin(4), pin(5)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    await tester.tap(find.text('白'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('白'));
+    await tester.pump();
+
+    expect(state.hands[1].melds, hasLength(1));
+    expect(state.hands[1].melds.single.kind, MeldKind.kotsu);
+    expect(state.hands[1].melds.single.source, CallSource.pon);
+    // The call forces an immediate discard of their own.
+    expect(state.discardPiles[1], hasLength(1));
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('drawing a kita and choosing キャンセル keeps it in the hand', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
