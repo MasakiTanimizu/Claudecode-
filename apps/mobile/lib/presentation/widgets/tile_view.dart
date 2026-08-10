@@ -99,10 +99,14 @@ class TileView extends StatelessWidget {
 /// (winds/dragons/北/華牌 render as styled text instead — see the class doc).
 Widget? _graphicFor(Tile tile) {
   if (tile is! NumberTile) return null;
+  final scatter = _scatterLayouts[tile.number];
   switch (tile.suit) {
     case NumberSuit.man:
       return _ManGraphic(number: tile.number);
     case NumberSuit.pin:
+      if (scatter != null) {
+        return _ScatterGrid(positions: scatter, dotBuilder: () => const PinDot());
+      }
       final rows = _dotRowCounts(tile.number);
       return _TileGrid(
         rowCounts: rows,
@@ -112,6 +116,9 @@ Widget? _graphicFor(Tile tile) {
         ),
       );
     case NumberSuit.sou:
+      if (scatter != null) {
+        return _ScatterGrid(positions: scatter, dotBuilder: () => const Bamboo());
+      }
       return _TileGrid(
         rowCounts: _dotRowCounts(tile.number),
         dotBuilder: (_, __) => Bamboo(big: tile.number == 1),
@@ -119,10 +126,10 @@ Widget? _graphicFor(Tile tile) {
   }
 }
 
-/// How many pips sit in each row for a 1-9 count, approximating the
-/// canonical layouts real pin/sou tiles use (single centered dot for 1,
-/// diagonal for 2-3, corners for 4, quincunx for 5, columns for 6/8/9, and
-/// 7 as a lone dot over two columns of three).
+/// How many pips sit in each row for the counts whose canonical layout is a
+/// plain centered grid (single centered dot for 1, diagonal for 2-3, corners
+/// for 4, quincunx for 5, two/three columns for 6/9). 7 and 8 aren't here —
+/// their real layout isn't a centered grid, see [_scatterLayouts].
 List<int> _dotRowCounts(int n) => switch (n) {
       1 => const [1],
       2 => const [1, 1],
@@ -130,11 +137,36 @@ List<int> _dotRowCounts(int n) => switch (n) {
       4 => const [2, 2],
       5 => const [2, 1, 2],
       6 => const [2, 2, 2],
-      7 => const [1, 3, 3],
-      8 => const [2, 2, 2, 2],
       9 => const [3, 3, 3],
       _ => [n],
     };
+
+/// Fractional (x, y) pip positions, 0..1 from the top-left, for the two
+/// counts whose traditional pin/sou layout isn't a centered grid: 7 is a
+/// diagonal three over a 2x2 block, and 8 is two 2x2 blocks offset
+/// diagonally — both standard pip arrangements real (and most simplified
+/// digital) mahjong tiles use, unlike a plain evenly-spaced grid.
+const _scatterLayouts = {
+  7: [
+    Offset(0.82, 0.10),
+    Offset(0.62, 0.30),
+    Offset(0.42, 0.50),
+    Offset(0.16, 0.58),
+    Offset(0.40, 0.58),
+    Offset(0.16, 0.86),
+    Offset(0.40, 0.86),
+  ],
+  8: [
+    Offset(0.18, 0.10),
+    Offset(0.42, 0.10),
+    Offset(0.18, 0.34),
+    Offset(0.42, 0.34),
+    Offset(0.58, 0.62),
+    Offset(0.82, 0.62),
+    Offset(0.58, 0.86),
+    Offset(0.82, 0.86),
+  ],
+};
 
 Widget _plainLabel(Tile tile) {
   if (tile is HanaTile) {
@@ -251,6 +283,30 @@ class _TileGrid extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Lays [dotBuilder]'s pips out at fixed fractional [positions] (see
+/// [_scatterLayouts]) instead of a centered grid — for the 7/8 counts whose
+/// canonical layout isn't evenly spaced rows.
+class _ScatterGrid extends StatelessWidget {
+  final List<Offset> positions;
+  final Widget Function() dotBuilder;
+
+  const _ScatterGrid({required this.positions, required this.dotBuilder});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 26,
+      height: 26,
+      child: Stack(
+        children: [
+          for (final p in positions)
+            Align(alignment: Alignment(p.dx * 2 - 1, p.dy * 2 - 1), child: dotBuilder()),
+        ],
+      ),
     );
   }
 }
