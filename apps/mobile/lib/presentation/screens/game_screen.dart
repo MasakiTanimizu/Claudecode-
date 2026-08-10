@@ -148,11 +148,17 @@ class _GameScreenState extends State<GameScreen> {
     _state = widget.state;
     // The one-time, dealer-first haipai kita sweep GameState.deal() already
     // ran and may be paused on any player, viewer included — resolve
-    // whichever CPUs come first in it, same as mid-round, before drawing
-    // for the viewer if it's already their turn. Can't setState this
-    // early (the element isn't mounted yet) — mutate directly, since the
-    // very first build() already reads fresh state.
+    // whichever CPUs come first in it, same as mid-round. Once that sweep
+    // is fully done it hands off to TurnPhase.awaitingDraw for the dealer
+    // — if the dealer isn't the viewer, _runCpuTurns() has to be the one
+    // to actually draw for them; _autoDrawForViewerIfNeeded() only ever
+    // fires for the viewer's own turn, so without this the game would
+    // freeze right here on mount whenever dealerIndex != viewerIndex
+    // (roughly 2 times out of 3) with nothing yet pressed. Can't setState
+    // this early (the element isn't mounted yet) — mutate directly, since
+    // the very first build() already reads fresh state.
     _resolveKitaDecisionsForCpu();
+    _runCpuTurns();
     _autoDrawForViewerIfNeeded();
   }
 
@@ -168,28 +174,33 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// The viewer nuku's their own pending kita, then — same as
-  /// [initState] — resolves whatever CPU haipai kita the sweep moves on
-  /// to next, and draws for the viewer if the sweep lands back on them
-  /// with the round properly under way. Without this, resolving the
-  /// viewer's own haipai kita could leave the sweep paused on a CPU with
-  /// no UI shown for it (not the viewer's turn) and nothing left to move
-  /// it forward — the game would just stop.
+  /// [initState] — resolves whatever CPU haipai kita the sweep moves on to
+  /// next, drives any CPU's normal turn if the sweep just handed off to
+  /// one, and draws for the viewer if it lands back on them. Without the
+  /// [_runCpuTurns] call specifically, a sweep that finishes by handing
+  /// off to a non-viewer dealer's ordinary turn (not another kita) would
+  /// leave the game stopped with nothing drawing for that dealer — the
+  /// exact same freeze [initState] guards against, just triggered by a tap
+  /// instead of on mount.
   void _nukiKita() {
     setState(() {
       _hanaPopups = [];
       _trackHana(_state.currentPlayerIndex, _state.nukiKita);
       _resolveKitaDecisionsForCpu();
+      _runCpuTurns();
       _autoDrawForViewerIfNeeded();
     });
   }
 
   /// The keep-in-hand counterpart to [_nukiKita] — see its doc for why
-  /// this also has to keep the haipai sweep moving afterward.
+  /// this also has to keep the haipai sweep (and any CPU turn it hands off
+  /// to) moving afterward.
   void _keepKita() {
     setState(() {
       _hanaPopups = [];
       _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
       _resolveKitaDecisionsForCpu();
+      _runCpuTurns();
       _autoDrawForViewerIfNeeded();
     });
   }
@@ -454,25 +465,45 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
-  /// Drives every other player's turn (draw, resolve any kita decision,
-  /// then tsumo if possible, otherwise a tile-efficiency discard —
-  /// declaring riichi with it first if that discard would keep them
-  /// tenpai) until control returns to the viewer or the round ends.
+  /// Drives every other player's turn — resolve any kita decision, then
+  /// tsumo if possible, otherwise a tile-efficiency discard (declaring
+  /// riichi with it first if that discard would keep them tenpai) — until
+  /// control returns to the viewer or the round ends.
+  ///
+  /// Only draws when [GameState.phase] is actually [TurnPhase.awaitingDraw]
+  /// — [_advanceAfterDiscard]'s call always finds it there (the very
+  /// definition of "next player's turn just started"), but
+  /// [initState]/[_nukiKita]/[_keepKita] can hand this a CPU already at
+  /// [TurnPhase.awaitingDiscard] instead (they just resolved their own
+  /// kita decision and now owe a discard, no draw due) — drawing again
+  /// there would violate [GameState]'s own phase precondition and throw.
   void _runCpuTurns() {
     while (!_state.isOver && _state.currentPlayerIndex != widget.viewerIndex) {
-      _trackHana(_state.currentPlayerIndex, _state.drawForCurrentPlayer);
-      if (_state.isOver) return; // exhaustive draw mid-loop.
-      _resolveKitaDecisionsForCpu();
-      if (_state.isOver) return; // exhaustive draw while resolving kita.
+      if (_state.phase == TurnPhase.awaitingDraw) {
+        _trackHana(_state.currentPlayerIndex, _state.drawForCurrentPlayer);
+        if (_state.isOver) return; // exhaustive draw mid-loop.
+        _resolveKitaDecisionsForCpu();
+        if (_state.isOver) return; // exhaustive draw while resolving kita.
+        if (_state.currentPlayerIndex == widget.viewerIndex) return; // landed on the viewer's own kita.
+      }
       if (_state.canDeclareTsumo()) {
         _state.declareTsumo();
         return;
       }
-      final discardTile = chooseDiscard(_state.currentHand);
-      if (_state.canDeclareRiichiWith(discardTile)) {
-        _state.declareRiichiAndDiscard(discardTile);
+      if (_state.riichiDeclared.contains(_state.currentPlayerIndex)) {
+        // Already riichi'd — the hand is locked, so this is a forced
+        // tsumogiri of whatever was just drawn, not a real choice.
+        // GameState.discard enforces this itself (throws on anything
+        // else), but chooseDiscard doesn't know about that constraint and
+        // can suggest a different tile from the concealed hand.
+        _state.discard(_state.currentHand.concealedTiles.last);
       } else {
-        _state.discard(discardTile);
+        final discardTile = chooseDiscard(_state.currentHand);
+        if (_state.canDeclareRiichiWith(discardTile)) {
+          _state.declareRiichiAndDiscard(discardTile);
+        } else {
+          _state.discard(discardTile);
+        }
       }
       if (_resolveReactionsToLastDiscard()) return; // round over, or viewer has a reaction.
     }

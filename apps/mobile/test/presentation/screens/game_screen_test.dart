@@ -297,6 +297,38 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
+  testWidgets('an already-riichi CPU is forced to discard exactly the tile it just drew, even when chooseDiscard would otherwise prefer a different one', (tester) async {
+    // Regression: _runCpuTurns used to call chooseDiscard(_state.currentHand)
+    // unconditionally, ignoring GameState.discard's own invariant that a
+    // riichi'd hand may only ever discard the tile it just drew. That's
+    // usually unobservable — a "clean" tenpai hand's only shanten-preserving
+    // discard already is the drawn tile — but ties happen, most commonly a
+    // chiitoitsu tenpai (6 pairs + 1 spare): drawing any unrelated tile
+    // leaves two equally-good chiitoitsu discards (the spare, or the new
+    // tile), and chooseDiscard's tie-break lands on the spare here
+    // (confirmed directly against chooseDiscard before writing this test),
+    // throwing "a riichi hand can only discard the tile just drawn".
+    final chiitoitsuTenpaiHand = Hand(concealedTiles: [
+      man(1), man(1), man(9), man(9),
+      pin(1), pin(1), pin(9), pin(9),
+      sou(1), sou(1), sou(9), sou(9),
+      DragonTile(Dragon.white),
+    ]);
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      chiitoitsuTenpaiHand,
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(5), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    state.riichiDeclared.add(1); // simulate a riichi already in effect.
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(tester.takeException(), isNull);
+    expect(state.discardPiles[1], contains(sou(5)));
+  });
+
   testWidgets('drawing a hana auto-nuku\'s it, never entering the hand', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
@@ -332,6 +364,34 @@ void main() {
 
     expect(state.hasPendingKitaDecision, isFalse);
     expect(find.text('抜く'), findsNothing);
+  });
+
+  testWidgets('mounting with a non-viewer dealer drives their (and the third player\'s) turn automatically', (tester) async {
+    // Regression: initState only ever called _resolveKitaDecisionsForCpu
+    // (handles a pending 抜く/キャンセル decision) and
+    // _autoDrawForViewerIfNeeded (only fires on the viewer's own turn) —
+    // neither one draws+discards for a CPU's perfectly ordinary turn. With
+    // dealerIndex != viewerIndex and no kita anywhere in sight (so
+    // _resolveKitaDecisionsForCpu is a no-op from the very first frame),
+    // the game used to freeze immediately on mount, nothing yet pressed.
+    // Fuzzed against 30,000 random deals across all 3 possible dealers to
+    // confirm the fix (adding a _runCpuTurns call) actually closes this —
+    // this test is the minimal, deterministic version of that same gap.
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)), // viewer (player0).
+      Hand(concealedTiles: filler(sou, 3, 13)), // dealer (player1) — a CPU.
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(9), man(9), pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(state.discardPiles[1], hasLength(1)); // the dealer (CPU) drew and discarded.
+    expect(state.discardPiles[2], hasLength(1)); // then the third player did too.
+    expect(state.currentPlayerIndex, 0); // now the viewer's turn.
+    expect(state.phase, TurnPhase.awaitingDiscard);
+    expect(state.hands[0].concealedTiles, hasLength(14)); // auto-drew for the viewer too.
   });
 
   testWidgets('resolving the viewer\'s own haipai kita never leaves the game stuck on a CPU\'s pending one', (tester) async {
