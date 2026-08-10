@@ -240,11 +240,6 @@ class _GameScreenState extends State<GameScreen> {
     _autoDrawForViewerIfNeeded();
   }
 
-  bool _viewerCanReactToLastDiscard() =>
-      _state.canDeclareRon(widget.viewerIndex) ||
-      _state.canDeclarePon(widget.viewerIndex) ||
-      _state.canDeclareDaiminkan(widget.viewerIndex);
-
   bool _viewerDeclinedCurrentReaction() =>
       _declinedReactionDiscarderIndex == _state.lastDiscarderIndex &&
       _declinedReactionPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
@@ -301,20 +296,21 @@ class _GameScreenState extends State<GameScreen> {
         }
       }
       if (callPlayer == null) return false; // nobody left to react to this discard.
+      final player = callPlayer; // final — safe to capture in the closure below.
 
       final calledTile = _state.discardPiles[_state.lastDiscarderIndex].last;
-      final handBeforeCall = _state.hands[callPlayer];
-      final canKan = _state.canDeclareDaiminkan(callPlayer);
+      final handBeforeCall = _state.hands[player];
+      final canKan = _state.canDeclareDaiminkan(player);
       final wantsKan = canKan &&
-          shouldCall(handBeforeCall, _hypotheticalDaiminkanHand(callPlayer, calledTile), _cpuDifficulty);
-      final canPon = !wantsKan && _state.canDeclarePon(callPlayer);
+          shouldCall(handBeforeCall, _hypotheticalDaiminkanHand(player, calledTile), _cpuDifficulty);
+      final canPon = !wantsKan && _state.canDeclarePon(player);
       final wantsPon =
-          canPon && shouldCall(handBeforeCall, _hypotheticalPonHand(callPlayer, calledTile), _cpuDifficulty);
+          canPon && shouldCall(handBeforeCall, _hypotheticalPonHand(player, calledTile), _cpuDifficulty);
 
       if (wantsKan) {
-        _trackHana(callPlayer, () => _state.declareDaiminkan(callPlayer));
+        _trackHana(player, () => _state.declareDaiminkan(player));
       } else if (wantsPon) {
-        _state.declarePon(callPlayer); // never itself draws.
+        _state.declarePon(player); // never itself draws.
       } else {
         return false; // eligible but not worth it — priority is spent either way.
       }
