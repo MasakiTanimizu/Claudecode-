@@ -397,6 +397,38 @@ void main() {
     expect(find.text('9p'), findsOneWidget);
   });
 
+  testWidgets('抜く when the replacement draw is also a kita re-offers 抜く/キャンセル for the new one', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const KitaTile(), const KitaTile(), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(find.text('抜く'), findsOneWidget);
+    expect(state.phase, TurnPhase.awaitingKitaDecision);
+
+    await tester.tap(find.text('抜く'));
+    await tester.pump();
+
+    // The replacement draw was itself a kita — still the viewer's own
+    // pending decision, so 抜く/キャンセル must be offered again for it
+    // rather than the screen going quiet with nothing to press.
+    expect(state.phase, TurnPhase.awaitingKitaDecision);
+    expect(find.text('抜く'), findsOneWidget);
+    expect(state.nukiTiles[0], [const KitaTile()]);
+
+    await tester.tap(find.text('抜く'));
+    await tester.pump();
+
+    expect(state.phase, TurnPhase.awaitingDiscard);
+    expect(state.nukiTiles[0], [const KitaTile(), const KitaTile()]);
+    expect(find.text('2p'), findsOneWidget);
+  });
+
   testWidgets('the drawn-but-undecided kita is shown in the hand while the choice is pending', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
