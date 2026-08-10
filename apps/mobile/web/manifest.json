@@ -1,0 +1,12 @@
+{
+    "name": "6華6北5等三麻",
+    "short_name": "sanma",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#0175C2",
+    "theme_color": "#0175C2",
+    "description": "6華6北5等三麻 — 3人打ち麻雀",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": []
+}

@@ -1,0 +1,27 @@
+name: sanma_mobile
+description: >
+  6華6北5等三麻 — Flutter client. Presentation-layer only; all mahjong rules
+  come from mahjong_engine (STEP1/STEP2, docs/design) so this app never
+  reimplements game logic.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  mahjong_engine:
+    path: ../../packages/mahjong_engine
+  shared_protocol:
+    path: ../../packages/shared_protocol
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

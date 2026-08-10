@@ -1,0 +1,20 @@
+name: shared_protocol
+description: >
+  Client/server shared DTOs built on top of mahjong_engine (STEP6
+  「クライアント/サーバー共有DTO」). Pure Dart — no Flutter or Serverpod
+  dependency here either, so it stays usable from plain Dart tooling
+  (tests, scripts) as well as both real targets.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  mahjong_engine:
+    path: ../mahjong_engine
+  meta: ^1.15.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

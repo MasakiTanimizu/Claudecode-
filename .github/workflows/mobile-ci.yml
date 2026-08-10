@@ -1,0 +1,39 @@
+name: mobile CI
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "apps/mobile/**"
+      - "packages/mahjong_engine/**"
+      - "packages/shared_protocol/**"
+      - ".github/workflows/mobile-ci.yml"
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "packages/mahjong_engine/**"
+      - "packages/shared_protocol/**"
+      - ".github/workflows/mobile-ci.yml"
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      # Non-blocking for the same reason as mahjong_engine-ci.yml: written
+      # without a local Flutter toolchain to run the formatter against.
+      - run: dart format --output=none --set-exit-if-changed .
+        continue-on-error: true
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+      # Web needs no Mac/Xcode (unlike iOS), so it's the one native-ish
+      # target this sandbox can actually verify end to end.
+      - run: flutter build web

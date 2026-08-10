@@ -1,0 +1,36 @@
+name: server CI
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "server/**"
+      - "packages/mahjong_engine/**"
+      - "packages/shared_protocol/**"
+      - ".github/workflows/server-ci.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "packages/mahjong_engine/**"
+      - "packages/shared_protocol/**"
+      - ".github/workflows/server-ci.yml"
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      # Non-blocking for the same reason as mahjong_engine-ci.yml: written
+      # without a local Dart toolchain to run the formatter against.
+      - run: dart format --output=none --set-exit-if-changed .
+        continue-on-error: true
+      - run: dart analyze --fatal-infos
+      - run: dart test
