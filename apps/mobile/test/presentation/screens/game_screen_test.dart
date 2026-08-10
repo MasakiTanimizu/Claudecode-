@@ -393,6 +393,25 @@ void main() {
     expect(find.text('9p'), findsOneWidget);
   });
 
+  testWidgets('the drawn-but-undecided kita is shown in the hand while the choice is pending', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const KitaTile(), pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+
+    expect(state.phase, TurnPhase.awaitingKitaDecision);
+    // Not actually in the engine's hand yet — only keepDrawnKita() puts it
+    // there — but shown in the UI so the viewer can see what they're being
+    // asked to keep or nuku, instead of just an unexplained 抜く/キャンセル.
+    expect(state.currentHand.concealedTiles, isNot(contains(const KitaTile())));
+    expect(find.text('北'), findsOneWidget);
+  });
+
   testWidgets('a discard the viewer can ron on offers ロン and ends the round on tap', (tester) async {
     final chiitoitsuTenpai = Hand(concealedTiles: [
       for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],

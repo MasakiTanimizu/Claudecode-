@@ -15,7 +15,12 @@ import '../widgets/mahjong_table_view.dart';
 /// [_shouminkan]), or resolve a kita (抜く/キャンセル, i.e. keep it in hand)
 /// whenever one comes up — including any dealt straight into their opening
 /// hand, which [GameState] offers the exact same choice for as one drawn
-/// mid-round. The other two players are driven locally by the tile-
+/// mid-round. While that decision is pending, the drawn kita is shown
+/// appended to "自分の手牌" (it isn't in [GameState]'s hand yet — only
+/// [keepDrawnKita] puts it there — but showing it lets the viewer see what
+/// they're actually being asked to keep or nuku).
+///
+/// The other two players are driven locally by the tile-
 /// efficiency CPU baseline (`ai/heuristic_discard.dart` and
 /// `ai/kita_decision.dart`), both mid-round and for their own haipai kita
 /// ([_resolveKitaDecisionsForCpu], also reused from [initState]) — they
@@ -430,7 +435,9 @@ class _GameScreenState extends State<GameScreen> {
               ],
             ),
             HandView(
-              concealedTiles: view.ownConcealedTiles,
+              concealedTiles: pendingKitaTile == null
+                  ? view.ownConcealedTiles
+                  : [...view.ownConcealedTiles, pendingKitaTile],
               melds: view.melds[widget.viewerIndex],
               onDiscard: canDiscard ? _discard : null,
             ),
