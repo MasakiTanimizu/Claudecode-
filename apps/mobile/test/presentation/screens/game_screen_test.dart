@@ -345,7 +345,7 @@ void main() {
     // Also shown as a popup, not just recorded on the engine side — see
     // GameScreen's class doc for why it's popup+badge instead of a
     // SnackBar/timer-based notification.
-    expect(find.textContaining('プレイヤー0が夏を抜きました'), findsOneWidget);
+    expect(find.text('ハナ！'), findsOneWidget);
   });
 
   testWidgets('抜く shows a 北 popup too, not just hana', (tester) async {
@@ -365,7 +365,7 @@ void main() {
     await tester.tap(find.text('抜く'));
     await tester.pump();
 
-    expect(find.textContaining('北！プレイヤー0が北を抜きました'), findsOneWidget);
+    expect(find.text('北！'), findsOneWidget);
   });
 
   testWidgets('a CPU\'s kita decision already pending at mount (e.g. from haipai) resolves silently before the viewer sees it', (tester) async {

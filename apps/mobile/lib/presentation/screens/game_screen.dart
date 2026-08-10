@@ -50,8 +50,9 @@ import '../widgets/tile_view.dart';
 ///
 /// A hana tile being auto-nuku'd, or a kita being nuku'd (viewer or CPU,
 /// deliberate 抜く or the automatic haipai/mid-round sweep alike), shows a
-/// brief pop-in-animated popup naming who and which tile ([_nukiPopups]/
-/// [_trackNuki]) — cleared at the start of the next user action rather
+/// brief pop-in-animated "ハナ！"/"北！" reaction badge next to the tile
+/// itself ([_nukiPopups]/[_trackNuki]) — cleared at the start of the
+/// next user action rather
 /// than on a [Timer], since a real one would leave one pending at test
 /// teardown unless every affected test remembered to flush it; the
 /// entrance animation itself is a [TweenAnimationBuilder], whose ticker is
@@ -764,9 +765,11 @@ class _GameScreenState extends State<GameScreen> {
 /// for a given nuki is a genuinely new widget in the tree on the frame it
 /// first appears, so [TweenAnimationBuilder] restarting its animation from
 /// [State.initState] lines up exactly with "just happened" — no manual
-/// replay trigger needed. Colored and headlined by hana vs kita (ハナ in
-/// pink, 北 in amber) so the category reads at a glance, with the specific
-/// tile (its season, for hana) as the supporting detail.
+/// replay trigger needed. Colored and labeled by hana vs kita (ハナ！ in
+/// pink, 北！ in amber) so the category reads at a glance, with the exact
+/// tile (its season, for hana) shown as a small icon alongside — no
+/// player attribution, since [MahjongTableView]'s seat badges already
+/// place that in context spatially.
 class _NukiPopupBadge extends StatelessWidget {
   final ({int player, Tile tile}) popup;
 
@@ -804,8 +807,8 @@ class _NukiPopupBadge extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Text(
-                '$kindLabel！プレイヤー${popup.player}が${popup.tile.label}を抜きました',
-                style: TextStyle(fontWeight: FontWeight.bold, color: color.shade900),
+                '$kindLabel！',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color.shade900),
               ),
             ],
           ),
