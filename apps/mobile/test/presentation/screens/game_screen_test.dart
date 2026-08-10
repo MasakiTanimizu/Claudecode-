@@ -636,4 +636,68 @@ void main() {
     expect(state.currentHand.concealedTiles, contains(const KitaTile()));
     expect(find.text('北'), findsOneWidget);
   });
+
+  testWidgets('次局へ applies the match result and deals a fresh round', (tester) async {
+    final tenpaiHand = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      tenpaiHand, // dealer (player0), wins.
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+    final ruleset = SixKaSixPeiSanmaRuleset();
+    final match = MatchState(ruleset: ruleset, startingScores: [35000, 35000, 35000]);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state, match: match)));
+
+    expect(find.text('和了'), findsOneWidget);
+    await tester.tap(find.text('和了'));
+    await tester.pump();
+
+    expect(find.text('次局へ'), findsOneWidget);
+    await tester.tap(find.text('次局へ'));
+    await tester.pump();
+
+    // Dealer tsumo, 七対子 (2翻): 2000 all — the dealer repeats (連荘).
+    expect(match.scores, [35000 + 4000, 35000 - 2000, 35000 - 2000]);
+    expect(match.dealerIndex, 0);
+    expect(match.honba, 1);
+    expect(find.text('自分の手牌'), findsOneWidget); // back on the board for the fresh round.
+    expect(find.text('次局へ'), findsNothing); // the new round isn't over.
+  });
+
+  testWidgets('次局へ shows the final-results screen once the match ends', (tester) async {
+    final tenpaiHand = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      Hand(concealedTiles: filler(sou, 3, 13)), // dealer (player0).
+      tenpaiHand, // player1, wins — a non-dealer win ends 南3局's match.
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([sou(9), pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+    state.drawForCurrentPlayer();
+    state.discard(sou(9));
+
+    final ruleset = SixKaSixPeiSanmaRuleset();
+    final match = MatchState(ruleset: ruleset, wind: RoundWind.south, roundNumber: 3, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state, match: match, viewerIndex: 1)));
+
+    expect(find.text('和了'), findsOneWidget);
+    await tester.tap(find.text('和了'));
+    await tester.pump();
+    await tester.tap(find.text('次局へ'));
+    await tester.pump();
+
+    expect(match.isOver, isTrue);
+    expect(find.text('半荘終了'), findsOneWidget);
+    expect(find.text('最終結果'), findsOneWidget);
+  });
 }

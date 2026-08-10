@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:mahjong_engine/mahjong_engine.dart';
 import 'package:shared_protocol/shared_protocol.dart';
@@ -54,18 +56,38 @@ import '../widgets/tile_view.dart';
 /// visible as small badges next to their label on [MahjongTableView] for a
 /// lasting record, not just the transient popup.
 ///
+/// When [match] is provided, a finished round also offers a "次局へ"
+/// button: tapping it feeds the just-finished [GameState] through
+/// [MatchState.advance] (updating running scores/dealer/honba) and, unless
+/// that was 半荘's last hand, deals and swaps in a fresh [GameState] for
+/// the next 局 in place — [_state] is a mutable field for exactly this,
+/// not just a `widget.state` passthrough. Once the match itself ends, the
+/// board is replaced by a final-scores summary instead. [match] is null
+/// for a single-round session (every existing screen/flow that doesn't
+/// care about round-to-round continuation) — nothing in this paragraph
+/// applies then, and the round-over banner is the final state.
+///
 /// Still out of scope here: ankan/shouminkan as a reaction to someone
 /// else's discard/kan (槍槓) isn't modeled — only ロン/ポン/大明槓 are;
-/// there's no running score across rounds or a "next round" flow — this
-/// screen only ever plays the one 局 it was dealt; and there's no
-/// wait-tile highlighting or animation for a hana/kita tile itself moving
-/// out of the hand (just the popup/badges above) — worth animating once
-/// there's a reason to invest in it, not urgent before then.
+/// exhaustive draws never pay tenpai/noten points (see [MatchState]'s own
+/// scope note — honba still accrues correctly, just no point transfer);
+/// and there's no wait-tile highlighting or animation for a hana/kita tile
+/// itself moving out of the hand (just the popup/badges above) — worth
+/// animating once there's a reason to invest in it, not urgent before
+/// then.
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
+  final MatchState? match;
+  final Map<String, Object?> config;
 
-  const GameScreen({required this.state, this.viewerIndex = 0, super.key});
+  const GameScreen({
+    required this.state,
+    this.viewerIndex = 0,
+    this.match,
+    this.config = const {},
+    super.key,
+  });
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -75,7 +97,10 @@ class GameScreen extends StatefulWidget {
 const _cpuDifficulty = CpuDifficulty.intermediate;
 
 class _GameScreenState extends State<GameScreen> {
-  GameState get _state => widget.state;
+  // A mutable field, not just a `widget.state` passthrough — starting the
+  // next 局 (via [_startNextRound]) swaps in a fresh [GameState] here
+  // rather than replacing the whole widget.
+  late GameState _state;
 
   // Identifies the one specific discard (by discarder + that discarder's
   // pile length right after it) the viewer has already declined to react
@@ -120,6 +145,7 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
+    _state = widget.state;
     // The one-time, dealer-first haipai kita sweep GameState.deal() already
     // ran and may be paused on any player, viewer included — resolve
     // whichever CPUs come first in it, same as mid-round, before drawing
@@ -386,6 +412,27 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  /// Applies the just-finished round to [widget.match] and, unless that
+  /// was 半荘's last hand, deals and swaps in the next 局's [GameState] —
+  /// only ever called when [widget.match] is non-null (see the "次局へ"
+  /// button in [build]). Resets every piece of per-round UI state
+  /// ([_riichiMode], the decline tracking, [_hanaPopups]) since none of it
+  /// means anything against a brand new round.
+  void _startNextRound() {
+    final match = widget.match!;
+    setState(() {
+      match.advance(_state);
+      _hanaPopups = [];
+      _riichiMode = false;
+      _declinedReactionDiscarderIndex = null;
+      _declinedReactionPileLength = null;
+      if (match.isOver) return;
+      _state = match.dealCurrentRound(random: Random(), config: widget.config);
+      _resolveKitaDecisionsForCpu();
+      _autoDrawForViewerIfNeeded();
+    });
+  }
+
   /// Resolves pending kita decisions using the CPU heuristic
   /// (`ai/kita_decision.dart`), stopping the instant it's the viewer's own
   /// turn to decide instead — their choice happens through the UI via
@@ -495,8 +542,38 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
+  /// The 半荘 final-results screen, shown instead of the board once
+  /// [MatchState.isOver] — ranked scores, nothing else (no "次局へ" to
+  /// press, there is no next 局).
+  Widget _buildMatchResultsScaffold(MatchState match) {
+    final ranked = [
+      for (var i = 0; i < match.scores.length; i++) (player: i, score: match.scores[i]),
+    ]..sort((a, b) => b.score.compareTo(a.score));
+    return Scaffold(
+      appBar: AppBar(title: const Text('半荘終了')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('最終結果', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(height: 12),
+            for (var rank = 0; rank < ranked.length; rank++)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text('${rank + 1}位: プレイヤー${ranked[rank].player}  ${ranked[rank].score}点'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final match = widget.match;
+    if (match != null && match.isOver) return _buildMatchResultsScaffold(match);
+
     final view = buildPlayerView(_state, viewerIndex: widget.viewerIndex);
     final isViewerTurn = !_state.isOver && _state.currentPlayerIndex == widget.viewerIndex;
     final canDiscard = isViewerTurn && _state.phase == TurnPhase.awaitingDiscard;
@@ -526,9 +603,19 @@ class _GameScreenState extends State<GameScreen> {
               if (result != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    _resultLabel(result),
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _resultLabel(result),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                      ),
+                      if (match != null) ...[
+                        const SizedBox(width: 8),
+                        ElevatedButton(onPressed: _startNextRound, child: const Text('次局へ')),
+                      ],
+                    ],
                   ),
                 ),
               if (_hanaPopups.isNotEmpty)
@@ -565,7 +652,12 @@ class _GameScreenState extends State<GameScreen> {
                   ),
                 ),
               Expanded(
-                child: MahjongTableView(view: view, wallRemaining: _state.wall.remainingLiveCount),
+                child: MahjongTableView(
+                  view: view,
+                  wallRemaining: _state.wall.remainingLiveCount,
+                  scores: match?.scores,
+                  roundLabel: match?.roundLabel,
+                ),
               ),
               if (canRon || canPon || canKan)
                 Padding(

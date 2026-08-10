@@ -93,4 +93,34 @@ void main() {
     expect(find.text('春'), findsOneWidget);
     expect(find.textContaining('山: ${state.wall.remainingLiveCount}枚'), findsOneWidget);
   });
+
+  testWidgets('shows running scores per seat and the round label when a match is passed in', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(2), pin(3), pin(4)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+    final view = buildPlayerView(state, viewerIndex: 0);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MahjongTableView(
+            view: view,
+            wallRemaining: state.wall.remainingLiveCount,
+            scores: const [36000, 34000, 35000],
+            roundLabel: '東1局',
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('プレイヤー0（親） 36000点'), findsOneWidget);
+    expect(find.textContaining('プレイヤー1 34000点'), findsOneWidget);
+    expect(find.textContaining('プレイヤー2 35000点'), findsOneWidget);
+    expect(find.text('東1局'), findsOneWidget);
+  });
 }

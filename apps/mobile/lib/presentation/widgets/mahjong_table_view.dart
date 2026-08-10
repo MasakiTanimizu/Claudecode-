@@ -23,7 +23,22 @@ class MahjongTableView extends StatelessWidget {
   /// display info from [GameState.wall], not part of [PlayerView] itself.
   final int wallRemaining;
 
-  const MahjongTableView({required this.view, required this.wallRemaining, super.key});
+  /// Running 半荘 scores, indexed by player — from [MatchState.scores] when
+  /// a match is in progress, or null for a single-round session (in which
+  /// case no score is shown on any seat).
+  final List<int>? scores;
+
+  /// E.g. "東1局 1本場" — from [MatchState.roundLabel], or null to omit it
+  /// from the center panel (single-round session, same as [scores]).
+  final String? roundLabel;
+
+  const MahjongTableView({
+    required this.view,
+    required this.wallRemaining,
+    this.scores,
+    this.roundLabel,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -44,20 +59,20 @@ class MahjongTableView extends StatelessWidget {
             Positioned(
               top: 8,
               left: 8,
-              child: _SeatLabel(playerIndex: leftIndex, view: view),
+              child: _SeatLabel(playerIndex: leftIndex, view: view, score: scores?[leftIndex]),
             ),
             Positioned(
               top: 8,
               right: 8,
-              child: _SeatLabel(playerIndex: rightIndex, view: view),
+              child: _SeatLabel(playerIndex: rightIndex, view: view, score: scores?[rightIndex]),
             ),
             Positioned(
               bottom: 8,
               left: 8,
-              child: _SeatLabel(playerIndex: viewerIndex, view: view),
+              child: _SeatLabel(playerIndex: viewerIndex, view: view, score: scores?[viewerIndex]),
             ),
             Align(
-              child: _CenterInfoPanel(view: view, wallRemaining: wallRemaining),
+              child: _CenterInfoPanel(view: view, wallRemaining: wallRemaining, roundLabel: roundLabel),
             ),
             Positioned(
               left: 48,
@@ -101,8 +116,9 @@ class MahjongTableView extends StatelessWidget {
 class _CenterInfoPanel extends StatelessWidget {
   final PlayerView view;
   final int wallRemaining;
+  final String? roundLabel;
 
-  const _CenterInfoPanel({required this.view, required this.wallRemaining});
+  const _CenterInfoPanel({required this.view, required this.wallRemaining, this.roundLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -116,6 +132,10 @@ class _CenterInfoPanel extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (roundLabel != null) ...[
+            Text(roundLabel!, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+          ],
           Text('山: $wallRemaining枚', style: style),
           const SizedBox(height: 4),
           Text(
@@ -139,13 +159,18 @@ class _SeatLabel extends StatelessWidget {
   final int playerIndex;
   final PlayerView view;
 
-  const _SeatLabel({required this.playerIndex, required this.view});
+  /// This seat's running 半荘 score, or null to omit it (single-round
+  /// session — see [MahjongTableView.scores]).
+  final int? score;
+
+  const _SeatLabel({required this.playerIndex, required this.view, this.score});
 
   @override
   Widget build(BuildContext context) {
-    final label = playerIndex == view.dealerIndex
+    final seatLabel = playerIndex == view.dealerIndex
         ? 'プレイヤー$playerIndex（親）'
         : 'プレイヤー$playerIndex';
+    final label = score == null ? seatLabel : '$seatLabel $score点';
     final isRiichi = view.riichiPlayers.contains(playerIndex);
     final isTurn = view.currentPlayerIndex == playerIndex;
     final nuki = view.nukiTiles[playerIndex];

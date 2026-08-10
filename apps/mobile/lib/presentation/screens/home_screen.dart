@@ -27,9 +27,10 @@ class HomeScreen extends StatelessWidget {
 
   void _startLocalRound(BuildContext context) {
     final ruleset = RulesetRegistry.resolve('sanma.six_ka_six_pei');
-    final state = ruleset.deal(random: Random(), dealerIndex: 0, config: const {});
+    final match = MatchState(ruleset: ruleset);
+    final state = match.dealCurrentRound(random: Random(), config: const {});
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => GameScreen(state: state)),
+      MaterialPageRoute(builder: (_) => GameScreen(state: state, match: match)),
     );
   }
 }
