@@ -16,6 +16,7 @@ export 'src/core/tile.dart';
 export 'src/core/tile_set.dart';
 export 'src/core/wall.dart';
 export 'src/engine/game_state.dart';
+export 'src/engine/match_state.dart';
 export 'src/engine/overall_shanten.dart';
 export 'src/engine/scoring.dart';
 export 'src/engine/shanten.dart';
