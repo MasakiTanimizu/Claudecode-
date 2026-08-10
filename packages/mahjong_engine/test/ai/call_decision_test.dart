@@ -52,26 +52,32 @@ void main() {
       expect(shouldCall(handBeforeCall, handAfterCall, CpuDifficulty.advanced), isTrue);
     });
 
-    test('中級/上級 decline when calling would break the hand\'s only pair', () {
-      // Tenpai as-is (waiting on 3s/6s) with man(1) pair as the head — pon-ing
-      // a third man(1) uses up that pair, leaving no pair anywhere else in
-      // the hand, which makes shanten worse instead of better.
+    test('中級/上級 decline when calling would destroy a much better 七対子 route', () {
+      // 6 pairs of otherwise-unconnected terminals/honors plus a lone 7th
+      // kind — already tenpai via 七対子 (waiting on the green dragon for
+      // the 7th pair). None of these pairs are adjacent ranks (1p/9p,
+      // 1s/9s) or the same suit run, so the standard (4 melds + pair) shape
+      // is far worse on this same hand. Pon-ing any of the pairs forms an
+      // open meld, which chiitoitsu can never allow — falling back to the
+      // much worse standard-only shanten makes calling a net loss overall,
+      // even though the call itself forms a "valid" group.
       final handBeforeCall = Hand(concealedTiles: [
+        pin(1), pin(1), pin(9), pin(9),
+        sou(1), sou(1), sou(9), sou(9),
         man(1), man(1),
-        pin(1), pin(2), pin(3),
-        pin(4), pin(5), pin(6),
-        sou(1), sou(2), sou(3),
-        sou(4), sou(5),
+        DragonTile(Dragon.white), DragonTile(Dragon.white),
+        DragonTile(Dragon.green),
       ]);
       final handAfterCall = Hand(
         concealedTiles: [
-          pin(1), pin(2), pin(3),
-          pin(4), pin(5), pin(6),
-          sou(1), sou(2), sou(3),
-          sou(4), sou(5),
+          pin(9), pin(9),
+          sou(1), sou(1), sou(9), sou(9),
+          man(1), man(1),
+          DragonTile(Dragon.white), DragonTile(Dragon.white),
+          DragonTile(Dragon.green),
         ],
         melds: [
-          Meld.kotsu([man(1), man(1), man(1)], source: CallSource.pon),
+          Meld.kotsu([pin(1), pin(1), pin(1)], source: CallSource.pon),
         ],
       );
 
