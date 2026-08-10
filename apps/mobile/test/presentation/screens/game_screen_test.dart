@@ -403,7 +403,12 @@ void main() {
       Hand(concealedTiles: filler(sou, 3, 13)),
       Hand(concealedTiles: filler(man, 1, 13)),
     ];
-    final wall = Wall([const KitaTile(), const KitaTile(), pin(2), pin(2)]);
+    // 5 tiles: the front 3 (K, K, 2p) get drawn; the back 2 (3p, 4p) are
+    // the wall's default 2-tile dora-indicator reserve and are never drawn
+    // (Wall.remainingLiveCount excludes them) — need enough live tiles for
+    // all 3 draws this test exercises, not just the 2 the tile count alone
+    // would suggest.
+    final wall = Wall([const KitaTile(), const KitaTile(), pin(2), pin(3), pin(4)]);
     final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
 
     await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
