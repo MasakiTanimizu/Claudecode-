@@ -310,6 +310,10 @@ void main() {
 
     expect(state.nukiTiles[0], [const HanaTile(HanaKind.summer)]);
     expect(state.currentHand.concealedTiles, isNot(contains(const HanaTile(HanaKind.summer))));
+    // Also shown as a popup, not just recorded on the engine side — see
+    // GameScreen's class doc for why it's popup+badge instead of a
+    // SnackBar/timer-based notification.
+    expect(find.textContaining('プレイヤー0が夏を抜きました'), findsOneWidget);
   });
 
   testWidgets('a CPU\'s kita decision already pending at mount (e.g. from haipai) resolves silently before the viewer sees it', (tester) async {

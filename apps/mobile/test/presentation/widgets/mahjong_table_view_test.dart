@@ -29,7 +29,9 @@ void main() {
     final view = buildPlayerView(state, viewerIndex: 0);
 
     await tester.pumpWidget(
-      MaterialApp(home: Scaffold(body: MahjongTableView(view: view))),
+      MaterialApp(
+        home: Scaffold(body: MahjongTableView(view: view, wallRemaining: state.wall.remainingLiveCount)),
+      ),
     );
 
     expect(tester.takeException(), isNull);
@@ -60,10 +62,35 @@ void main() {
     final view = buildPlayerView(state, viewerIndex: 2);
 
     await tester.pumpWidget(
-      MaterialApp(home: Scaffold(body: MahjongTableView(view: view))),
+      MaterialApp(
+        home: Scaffold(body: MahjongTableView(view: view, wallRemaining: state.wall.remainingLiveCount)),
+      ),
     );
 
     expect(tester.takeException(), isNull);
     expect(find.textContaining('立直'), findsOneWidget);
+  });
+
+  testWidgets('shows a player\'s nuku\'d hana as a small badge next to their seat, plus wall/dora info', (tester) async {
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const HanaTile(HanaKind.spring), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+    state.drawForCurrentPlayer(); // auto-nuku's the spring hana.
+
+    final view = buildPlayerView(state, viewerIndex: 0);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: MahjongTableView(view: view, wallRemaining: state.wall.remainingLiveCount)),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('春'), findsOneWidget);
+    expect(find.textContaining('山: ${state.wall.remainingLiveCount}枚'), findsOneWidget);
   });
 }

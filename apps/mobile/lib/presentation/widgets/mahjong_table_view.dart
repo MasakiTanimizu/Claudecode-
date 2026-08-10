@@ -7,11 +7,23 @@ import 'tile_view.dart';
 /// A square 卓 (table) with each player's discard pile (河) laid out along
 /// their own side, 雀魂-style — the viewer's river along the bottom edge,
 /// the next player's along the right edge, and the player after that along
-/// the left edge, each rotated to face the table's center.
+/// the left edge, each rotated to face the table's center. Each seat's
+/// label also shows their nuku'd hana/kita tiles as small badges, so the
+/// whole table — rivers, nuki tiles, wall count, dora — fits in one glance
+/// without a separate list elsewhere on screen.
+///
+/// Sizes itself to whatever its parent gives it ([SizedBox.expand]) rather
+/// than a fixed height, so callers can fit it into a non-scrolling layout
+/// via [Expanded] alongside the rest of the screen (STEP7「対局画面」1画面
+/// 完結レイアウト).
 class MahjongTableView extends StatelessWidget {
   final PlayerView view;
 
-  const MahjongTableView({required this.view, super.key});
+  /// Tiles left in the live wall, shown in the center panel — purely
+  /// display info from [GameState.wall], not part of [PlayerView] itself.
+  final int wallRemaining;
+
+  const MahjongTableView({required this.view, required this.wallRemaining, super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -19,68 +31,103 @@ class MahjongTableView extends StatelessWidget {
     final rightIndex = (viewerIndex + 1) % view.discardPiles.length;
     final leftIndex = (viewerIndex + 2) % view.discardPiles.length;
 
-    return Container(
-      height: 320,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: const Color(0xFF175C3A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF6B4A2B), width: 8),
+    return SizedBox.expand(
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: const Color(0xFF175C3A),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF6B4A2B), width: 8),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: 8,
+              left: 8,
+              child: _SeatLabel(playerIndex: leftIndex, view: view),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: _SeatLabel(playerIndex: rightIndex, view: view),
+            ),
+            Positioned(
+              bottom: 8,
+              left: 8,
+              child: _SeatLabel(playerIndex: viewerIndex, view: view),
+            ),
+            Align(
+              child: _CenterInfoPanel(view: view, wallRemaining: wallRemaining),
+            ),
+            Positioned(
+              left: 48,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: RotatedBox(
+                  quarterTurns: 1,
+                  child: _RiverWrap(tiles: view.discardPiles[leftIndex]),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 48,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: RotatedBox(
+                  quarterTurns: 3,
+                  child: _RiverWrap(tiles: view.discardPiles[rightIndex]),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 8,
+              left: 56,
+              right: 56,
+              child: Center(
+                child: _RiverWrap(tiles: view.discardPiles[viewerIndex]),
+              ),
+            ),
+          ],
+        ),
       ),
-      child: Stack(
+    );
+  }
+}
+
+/// The table's center card: round/turn status plus wall and dora info —
+/// everything that isn't tied to one specific seat.
+class _CenterInfoPanel extends StatelessWidget {
+  final PlayerView view;
+  final int wallRemaining;
+
+  const _CenterInfoPanel({required this.view, required this.wallRemaining});
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(color: Colors.white, fontSize: 11);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Positioned(
-            top: 8,
-            left: 8,
-            child: _SeatLabel(playerIndex: leftIndex, view: view),
+          Text('山: $wallRemaining枚', style: style),
+          const SizedBox(height: 4),
+          Text(
+            'ドラ表示: ${view.doraIndicators.map((t) => t.label).join(' ')}',
+            style: style,
+            textAlign: TextAlign.center,
           ),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: _SeatLabel(playerIndex: rightIndex, view: view),
-          ),
-          Positioned(
-            bottom: 8,
-            left: 8,
-            child: _SeatLabel(playerIndex: viewerIndex, view: view),
-          ),
-          Align(
-            child: Text(
-              'ドラ表示: ${view.doraIndicators.map((t) => t.label).join(' ')}\n'
-              '手番: プレイヤー${view.currentPlayerIndex}  局面: ${view.phase.name}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-          Positioned(
-            left: 48,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: RotatedBox(
-                quarterTurns: 1,
-                child: _RiverWrap(tiles: view.discardPiles[leftIndex]),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 48,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: RotatedBox(
-                quarterTurns: 3,
-                child: _RiverWrap(tiles: view.discardPiles[rightIndex]),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 8,
-            left: 56,
-            right: 56,
-            child: Center(
-              child: _RiverWrap(tiles: view.discardPiles[viewerIndex]),
-            ),
+          const SizedBox(height: 4),
+          Text(
+            '手番: プレイヤー${view.currentPlayerIndex}  局面: ${view.phase.name}',
+            style: style,
+            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -101,18 +148,43 @@ class _SeatLabel extends StatelessWidget {
         : 'プレイヤー$playerIndex';
     final isRiichi = view.riichiPlayers.contains(playerIndex);
     final isTurn = view.currentPlayerIndex == playerIndex;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: isTurn ? Colors.amber.withValues(alpha: 0.85) : Colors.black.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        child: Text(
-          isRiichi ? '$label 立直' : label,
-          style: TextStyle(color: isTurn ? Colors.black : Colors.white, fontSize: 12),
+    final nuki = view.nukiTiles[playerIndex];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: isTurn ? Colors.amber.withValues(alpha: 0.85) : Colors.black.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            child: Text(
+              isRiichi ? '$label 立直' : label,
+              style: TextStyle(color: isTurn ? Colors.black : Colors.white, fontSize: 12),
+            ),
+          ),
         ),
-      ),
+        if (nuki.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: SizedBox(
+              height: 22,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final tile in nuki)
+                    SizedBox(
+                      width: 16,
+                      height: 22,
+                      child: FittedBox(fit: BoxFit.contain, child: TileView(tile)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

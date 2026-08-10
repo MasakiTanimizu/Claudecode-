@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:mahjong_engine/mahjong_engine.dart';
 import 'package:shared_protocol/shared_protocol.dart';
 
-import '../widgets/discard_pile_view.dart';
 import '../widgets/hand_view.dart';
 import '../widgets/mahjong_table_view.dart';
+import '../widgets/tile_view.dart';
 
 /// One player's view of a live [GameState] (STEP7「対局画面」), interactive
 /// for the viewer's own turn: the viewer's draw happens automatically (no
@@ -41,15 +41,22 @@ import '../widgets/mahjong_table_view.dart';
 /// score yet; the banner just omits the point figure for that one case
 /// rather than guessing.
 ///
+/// A hana tile being auto-nuku'd also shows a brief popup naming who and
+/// which tile ([_hanaPopups]/[_trackHana]) — cleared at the start of the
+/// next user action rather than on a timer, since a real one would leave a
+/// pending Timer at test teardown unless every affected test remembered to
+/// flush it. Each seat's own nuki tiles (hana and kita alike) also stay
+/// visible as small badges next to their label on [MahjongTableView] for a
+/// lasting record, not just the transient popup.
+///
 /// Still out of scope here: the CPU stand-ins never call (pon/kan/ron) on
 /// another player's discard, only riichi on their own turn; ankan/
 /// shouminkan as a reaction to someone else's discard/kan (槍槓) isn't
 /// modeled; there's no running score across rounds or a "next round" flow
 /// — this screen only ever plays the one 局 it was dealt; and there's no
-/// wait-tile highlighting or visible animation for a hana/kita being
-/// nuku'd (each player's own 抜き牌 list on the table is the only record
-/// for now — worth animating once there's real tile art, not urgent
-/// before then).
+/// wait-tile highlighting or animation for a hana/kita tile itself moving
+/// out of the hand (just the popup/badges above) — worth animating once
+/// there's a reason to invest in it, not urgent before then.
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
@@ -81,6 +88,30 @@ class _GameScreenState extends State<GameScreen> {
   // a plain discard they didn't ask for).
   bool _riichiMode = false;
 
+  // Hana tiles nuku'd as a direct result of the most recent user action
+  // (the viewer's own draw/kita/kan, or any CPU turns that action set off),
+  // shown as a small popup near "自分の手牌" so it's visible on-screen that
+  // it happened (STEP7: hana are auto-nuku'd with no decision, so without
+  // this there'd be no visible record besides the seat's nuki-tile badge).
+  // Cleared at the start of the next user action rather than on a timer —
+  // a timer would leave one pending at test teardown unless every affected
+  // test remembered to flush it (see this file's git history for that
+  // exact problem with an earlier SnackBar-based version of this).
+  List<({int player, HanaTile tile})> _hanaPopups = [];
+
+  /// Runs [action] (an engine call for [player]) and appends any hana
+  /// tiles it newly nuku's to [_hanaPopups]. Covers every engine call that
+  /// can draw a replacement tile mid-call and so might transparently nuku
+  /// a hana along the way: a plain draw, a kita nuku (mid-round or haipai),
+  /// and a kan's post-declaration replacement draw.
+  void _trackHana(int player, void Function() action) {
+    final before = _state.nukiTiles[player].length;
+    action();
+    for (final tile in _state.nukiTiles[player].skip(before)) {
+      if (tile is HanaTile) _hanaPopups.add((player: player, tile: tile));
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,7 +132,7 @@ class _GameScreenState extends State<GameScreen> {
     if (!_state.isOver &&
         _state.currentPlayerIndex == widget.viewerIndex &&
         _state.phase == TurnPhase.awaitingDraw) {
-      _state.drawForCurrentPlayer();
+      _trackHana(widget.viewerIndex, _state.drawForCurrentPlayer);
     }
   }
 
@@ -114,7 +145,8 @@ class _GameScreenState extends State<GameScreen> {
   /// it forward — the game would just stop.
   void _nukiKita() {
     setState(() {
-      _state.nukiKita();
+      _hanaPopups = [];
+      _trackHana(_state.currentPlayerIndex, _state.nukiKita);
       _resolveKitaDecisionsForCpu();
       _autoDrawForViewerIfNeeded();
     });
@@ -124,7 +156,8 @@ class _GameScreenState extends State<GameScreen> {
   /// this also has to keep the haipai sweep moving afterward.
   void _keepKita() {
     setState(() {
-      _state.keepDrawnKita();
+      _hanaPopups = [];
+      _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
       _resolveKitaDecisionsForCpu();
       _autoDrawForViewerIfNeeded();
     });
@@ -134,6 +167,7 @@ class _GameScreenState extends State<GameScreen> {
     if (_riichiMode) {
       if (!_state.canDeclareRiichiWith(tile)) return; // only a tenpai-preserving tile is valid.
       setState(() {
+        _hanaPopups = [];
         _state.declareRiichiAndDiscard(tile);
         _riichiMode = false;
         _advanceAfterDiscard();
@@ -141,6 +175,7 @@ class _GameScreenState extends State<GameScreen> {
       return;
     }
     setState(() {
+      _hanaPopups = [];
       _state.discard(tile);
       _advanceAfterDiscard();
     });
@@ -152,14 +187,16 @@ class _GameScreenState extends State<GameScreen> {
 
   void _ankan(Tile tile) {
     setState(() {
-      _state.declareAnkan(tile);
+      _hanaPopups = [];
+      _trackHana(_state.currentPlayerIndex, () => _state.declareAnkan(tile));
       _riichiMode = false; // the hand just changed; any pending riichi pick is stale.
     });
   }
 
   void _shouminkan(Tile tile) {
     setState(() {
-      _state.declareShouminkan(tile);
+      _hanaPopups = [];
+      _trackHana(_state.currentPlayerIndex, () => _state.declareShouminkan(tile));
       _riichiMode = false;
     });
   }
@@ -207,19 +244,29 @@ class _GameScreenState extends State<GameScreen> {
       _declinedReactionPileLength == _state.discardPiles[_state.lastDiscarderIndex].length;
 
   void _ron() {
-    setState(() => _state.declareRon(widget.viewerIndex));
+    setState(() {
+      _hanaPopups = [];
+      _state.declareRon(widget.viewerIndex);
+    });
   }
 
   void _pon() {
-    setState(() => _state.declarePon(widget.viewerIndex));
+    setState(() {
+      _hanaPopups = [];
+      _state.declarePon(widget.viewerIndex);
+    });
   }
 
   void _kan() {
-    setState(() => _state.declareDaiminkan(widget.viewerIndex));
+    setState(() {
+      _hanaPopups = [];
+      _trackHana(widget.viewerIndex, () => _state.declareDaiminkan(widget.viewerIndex));
+    });
   }
 
   void _declineReaction() {
     setState(() {
+      _hanaPopups = [];
       _declinedReactionDiscarderIndex = _state.lastDiscarderIndex;
       _declinedReactionPileLength = _state.discardPiles[_state.lastDiscarderIndex].length;
       _advanceAfterDiscard();
@@ -227,7 +274,10 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _declareTsumo() {
-    setState(_state.declareTsumo);
+    setState(() {
+      _hanaPopups = [];
+      _state.declareTsumo();
+    });
   }
 
   /// Resolves pending kita decisions using the CPU heuristic
@@ -238,14 +288,15 @@ class _GameScreenState extends State<GameScreen> {
   /// kita sweep (where it might be the viewer's from the very first tile).
   void _resolveKitaDecisionsForCpu() {
     while (_state.hasPendingKitaDecision && _state.currentPlayerIndex != widget.viewerIndex) {
+      final player = _state.currentPlayerIndex;
       final hypotheticalHand = Hand(
         concealedTiles: [..._state.currentHand.concealedTiles, _state.pendingKitaTile!],
         melds: _state.currentHand.melds,
       );
       if (shouldKeepDrawnKita(hypotheticalHand, _cpuKitaDifficulty)) {
-        _state.keepDrawnKita();
+        _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
       } else {
-        _state.nukiKita();
+        _trackHana(player, _state.nukiKita);
       }
     }
   }
@@ -256,7 +307,7 @@ class _GameScreenState extends State<GameScreen> {
   /// tenpai) until control returns to the viewer or the round ends.
   void _runCpuTurns() {
     while (!_state.isOver && _state.currentPlayerIndex != widget.viewerIndex) {
-      _state.drawForCurrentPlayer();
+      _trackHana(_state.currentPlayerIndex, _state.drawForCurrentPlayer);
       if (_state.isOver) return; // exhaustive draw mid-loop.
       _resolveKitaDecisionsForCpu();
       if (_state.isOver) return; // exhaustive draw while resolving kita.
@@ -354,94 +405,126 @@ class _GameScreenState extends State<GameScreen> {
     final result = _state.result;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('対局')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (result != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  _resultLabel(result),
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-              ),
-            MahjongTableView(view: view),
-            const SizedBox(height: 12),
-            for (var i = 0; i < view.nukiTiles.length; i++)
-              if (view.nukiTiles[i].isNotEmpty) ...[
-                DiscardPileView(
-                  playerLabel: 'プレイヤー$iの抜き牌',
-                  discards: view.nukiTiles[i],
-                ),
-                const SizedBox(height: 8),
-              ],
-            if (canRon || canPon || canKan)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    if (canRon) ...[
-                      ElevatedButton(onPressed: _ron, child: const Text('ロン')),
-                      const SizedBox(width: 8),
-                    ],
-                    if (canPon) ...[
-                      ElevatedButton(onPressed: _pon, child: const Text('ポン')),
-                      const SizedBox(width: 8),
-                    ],
-                    if (canKan) ...[
-                      ElevatedButton(onPressed: _kan, child: const Text('カン')),
-                      const SizedBox(width: 8),
-                    ],
-                    ElevatedButton(onPressed: _declineReaction, child: const Text('キャンセル')),
-                  ],
-                ),
-              ),
-            if (pendingKitaTile != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    ElevatedButton(onPressed: _nukiKita, child: const Text('抜く')),
-                    const SizedBox(width: 8),
-                    ElevatedButton(onPressed: _keepKita, child: const Text('キャンセル')),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Text('自分の手牌', style: TextStyle(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                if (canTsumo) ...[
-                  ElevatedButton(onPressed: _declareTsumo, child: const Text('和了')),
-                  const SizedBox(width: 8),
-                ],
-                if (canRiichi || _riichiMode) ...[
-                  ElevatedButton(
-                    onPressed: _toggleRiichiMode,
-                    child: Text(_riichiMode ? 'リーチ選択中（キャンセル）' : 'リーチ'),
+      appBar: AppBar(title: const Text('対局'), toolbarHeight: 40),
+      // A plain (non-scrolling) Column, not a SingleChildScrollView: the
+      // table gets whatever vertical space is left over via Expanded once
+      // every other (fixed-height) row is laid out, so the whole screen —
+      // rivers, hand, and any status/action rows — fits in one glance
+      // without scrolling (STEP7 1画面完結レイアウト).
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (result != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    _resultLabel(result),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                   ),
-                  const SizedBox(width: 8),
+                ),
+              if (_hanaPopups.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      for (final popup in _hanaPopups)
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.pink.shade50,
+                            border: Border.all(color: Colors.pink.shade200),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 26,
+                                  child: FittedBox(fit: BoxFit.contain, child: TileView(popup.tile)),
+                                ),
+                                const SizedBox(width: 4),
+                                Text('プレイヤー${popup.player}が${popup.tile.label}を抜きました'),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              Expanded(
+                child: MahjongTableView(view: view, wallRemaining: _state.wall.remainingLiveCount),
+              ),
+              if (canRon || canPon || canKan)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      if (canRon) ...[
+                        ElevatedButton(onPressed: _ron, child: const Text('ロン')),
+                        const SizedBox(width: 8),
+                      ],
+                      if (canPon) ...[
+                        ElevatedButton(onPressed: _pon, child: const Text('ポン')),
+                        const SizedBox(width: 8),
+                      ],
+                      if (canKan) ...[
+                        ElevatedButton(onPressed: _kan, child: const Text('カン')),
+                        const SizedBox(width: 8),
+                      ],
+                      ElevatedButton(onPressed: _declineReaction, child: const Text('キャンセル')),
+                    ],
+                  ),
+                ),
+              if (pendingKitaTile != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      ElevatedButton(onPressed: _nukiKita, child: const Text('抜く')),
+                      const SizedBox(width: 8),
+                      ElevatedButton(onPressed: _keepKita, child: const Text('キャンセル')),
+                    ],
+                  ),
+                ),
+              Row(
+                children: [
+                  const Text('自分の手牌', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  if (canTsumo) ...[
+                    ElevatedButton(onPressed: _declareTsumo, child: const Text('和了')),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canRiichi || _riichiMode) ...[
+                    ElevatedButton(
+                      onPressed: _toggleRiichiMode,
+                      child: Text(_riichiMode ? 'リーチ選択中（キャンセル）' : 'リーチ'),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (ankanTile != null) ...[
+                    ElevatedButton(onPressed: () => _ankan(ankanTile), child: const Text('暗槓')),
+                    const SizedBox(width: 8),
+                  ],
+                  if (shouminkanTile != null)
+                    ElevatedButton(onPressed: () => _shouminkan(shouminkanTile), child: const Text('加槓')),
                 ],
-                if (ankanTile != null) ...[
-                  ElevatedButton(onPressed: () => _ankan(ankanTile), child: const Text('暗槓')),
-                  const SizedBox(width: 8),
-                ],
-                if (shouminkanTile != null)
-                  ElevatedButton(onPressed: () => _shouminkan(shouminkanTile), child: const Text('加槓')),
-              ],
-            ),
-            HandView(
-              concealedTiles: pendingKitaTile == null
-                  ? view.ownConcealedTiles
-                  : [...view.ownConcealedTiles, pendingKitaTile],
-              melds: view.melds[widget.viewerIndex],
-              onDiscard: canDiscard ? _discard : null,
-            ),
-          ],
+              ),
+              HandView(
+                concealedTiles: pendingKitaTile == null
+                    ? view.ownConcealedTiles
+                    : [...view.ownConcealedTiles, pendingKitaTile],
+                melds: view.melds[widget.viewerIndex],
+                onDiscard: canDiscard ? _discard : null,
+              ),
+            ],
+          ),
         ),
       ),
     );
