@@ -157,7 +157,15 @@ class _GameScreenState extends State<GameScreen> {
     // (roughly 2 times out of 3) with nothing yet pressed. Can't setState
     // this early (the element isn't mounted yet) — mutate directly, since
     // the very first build() already reads fresh state.
+    //
+    // [widget.state] could also arrive already sitting on an unresolved
+    // discard (phase awaitingDraw right after someone's discard, viewer
+    // reaction still open) rather than a fresh deal — same check
+    // [_advanceAfterDiscard] always runs before its own [_runCpuTurns]
+    // call, needed here too or [_runCpuTurns] would draw straight past the
+    // viewer's ロン/ポン/カン window without ever offering it.
     _resolveKitaDecisionsForCpu();
+    if (_resolveReactionsToLastDiscard()) return;
     _runCpuTurns();
     _autoDrawForViewerIfNeeded();
   }
@@ -181,12 +189,15 @@ class _GameScreenState extends State<GameScreen> {
   /// off to a non-viewer dealer's ordinary turn (not another kita) would
   /// leave the game stopped with nothing drawing for that dealer — the
   /// exact same freeze [initState] guards against, just triggered by a tap
-  /// instead of on mount.
+  /// instead of on mount. Also checks [_resolveReactionsToLastDiscard]
+  /// first, same as [initState], in case the hand-off lands right after a
+  /// discard the viewer could still react to.
   void _nukiKita() {
     setState(() {
       _hanaPopups = [];
       _trackHana(_state.currentPlayerIndex, _state.nukiKita);
       _resolveKitaDecisionsForCpu();
+      if (_resolveReactionsToLastDiscard()) return;
       _runCpuTurns();
       _autoDrawForViewerIfNeeded();
     });
@@ -200,6 +211,7 @@ class _GameScreenState extends State<GameScreen> {
       _hanaPopups = [];
       _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
       _resolveKitaDecisionsForCpu();
+      if (_resolveReactionsToLastDiscard()) return;
       _runCpuTurns();
       _autoDrawForViewerIfNeeded();
     });
@@ -429,6 +441,11 @@ class _GameScreenState extends State<GameScreen> {
   /// button in [build]). Resets every piece of per-round UI state
   /// ([_riichiMode], the decline tracking, [_hanaPopups]) since none of it
   /// means anything against a brand new round.
+  ///
+  /// Needs the same [_runCpuTurns] call as [initState] and for the same
+  /// reason: [match.dealCurrentRound] hands back a fresh deal that could
+  /// just as easily start on a non-viewer dealer, and nothing else here
+  /// draws for them.
   void _startNextRound() {
     final match = widget.match!;
     setState(() {
@@ -440,6 +457,7 @@ class _GameScreenState extends State<GameScreen> {
       if (match.isOver) return;
       _state = match.dealCurrentRound(random: Random(), config: widget.config);
       _resolveKitaDecisionsForCpu();
+      _runCpuTurns();
       _autoDrawForViewerIfNeeded();
     });
   }

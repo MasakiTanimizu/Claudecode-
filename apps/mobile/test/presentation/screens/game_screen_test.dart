@@ -697,6 +697,54 @@ void main() {
     expect(find.text('北'), findsOneWidget);
   });
 
+  testWidgets('次局へ never leaves the game stuck when the next round\'s dealer isn\'t the viewer', (tester) async {
+    // Regression: _startNextRound swapped in match.dealCurrentRound's fresh
+    // GameState and resolved pending kita decisions, but never called
+    // _runCpuTurns — the exact same gap initState had, just triggered by
+    // tapping 次局へ instead of mounting. A dealer's tsumo win means the
+    // same dealer repeats (連荘, already covered by the test below), so
+    // player1 (a CPU) stays dealer deterministically into the next round —
+    // pre-fix, that next round would freeze immediately, stuck on player1's
+    // turn with nothing drawing for them.
+    final tenpaiHand = Hand(concealedTiles: [
+      for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
+      pin(7),
+    ]);
+    final hands = [
+      Hand(concealedTiles: filler(sou, 3, 13)), // viewer (player0).
+      tenpaiHand, // dealer (player1) — a CPU, tsumo's immediately on mount.
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([pin(7), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 1);
+    final ruleset = SixKaSixPeiSanmaRuleset();
+    final match = MatchState(ruleset: ruleset, dealerIndex: 1, startingScores: [35000, 35000, 35000]);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state, match: match)));
+
+    expect(state.isOver, isTrue);
+    expect(state.result!.reason, RoundOverReason.tsumo);
+    expect(state.result!.winnerIndex, 1);
+
+    await tester.tap(find.text('次局へ'));
+    await tester.pump();
+
+    expect(match.dealerIndex, 1); // dealer tsumo repeats (連荘) — still a CPU.
+    // [state] itself is stale after _startNextRound swaps in a fresh
+    // GameState internally, and its hand contents are randomly dealt, so
+    // neither is usable here — but MahjongTableView always renders a
+    // "手番: プレイヤーN  局面: ..." debug line reflecting the *current*
+    // internal state, which settles synchronously within the single tap
+    // above regardless of what got dealt. It must never show a CPU
+    // (player1/player2) still waiting to draw or discard — that's exactly
+    // what a freeze would look like.
+    for (final player in [1, 2]) {
+      for (final phase in [TurnPhase.awaitingDraw, TurnPhase.awaitingDiscard]) {
+        expect(find.textContaining('手番: プレイヤー$player  局面: ${phase.name}'), findsNothing);
+      }
+    }
+  });
+
   testWidgets('次局へ applies the match result and deals a fresh round', (tester) async {
     final tenpaiHand = Hand(concealedTiles: [
       for (var n = 1; n <= 6; n++) ...[pin(n), pin(n)],
