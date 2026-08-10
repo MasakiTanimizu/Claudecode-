@@ -48,13 +48,18 @@ import '../widgets/tile_view.dart';
 /// score yet; the banner just omits the point figure for that one case
 /// rather than guessing.
 ///
-/// A hana tile being auto-nuku'd also shows a brief popup naming who and
-/// which tile ([_hanaPopups]/[_trackHana]) — cleared at the start of the
-/// next user action rather than on a timer, since a real one would leave a
-/// pending Timer at test teardown unless every affected test remembered to
-/// flush it. Each seat's own nuki tiles (hana and kita alike) also stay
-/// visible as small badges next to their label on [MahjongTableView] for a
-/// lasting record, not just the transient popup.
+/// A hana tile being auto-nuku'd, or a kita being nuku'd (viewer or CPU,
+/// deliberate 抜く or the automatic haipai/mid-round sweep alike), shows a
+/// brief pop-in-animated popup naming who and which tile ([_nukiPopups]/
+/// [_trackNuki]) — cleared at the start of the next user action rather
+/// than on a [Timer], since a real one would leave one pending at test
+/// teardown unless every affected test remembered to flush it; the
+/// entrance animation itself is a [TweenAnimationBuilder], whose ticker is
+/// owned and disposed by the widget tree itself rather than a bare
+/// [Timer], so it carries none of that risk. Each seat's own nuki tiles
+/// (hana and kita alike) also stay visible as small badges next to their
+/// label on [MahjongTableView] for a lasting record, not just the
+/// transient popup.
 ///
 /// When [match] is provided, a finished round also offers a "次局へ"
 /// button: tapping it feeds the just-finished [GameState] through
@@ -71,10 +76,7 @@ import '../widgets/tile_view.dart';
 /// else's discard/kan (槍槓) isn't modeled — only ロン/ポン/大明槓 are;
 /// exhaustive draws never pay tenpai/noten points (see [MatchState]'s own
 /// scope note — honba still accrues correctly, just no point transfer);
-/// and there's no wait-tile highlighting or animation for a hana/kita tile
-/// itself moving out of the hand (just the popup/badges above) — worth
-/// animating once there's a reason to invest in it, not urgent before
-/// then.
+/// and there's no wait-tile highlighting.
 class GameScreen extends StatefulWidget {
   final GameState state;
   final int viewerIndex;
@@ -118,27 +120,29 @@ class _GameScreenState extends State<GameScreen> {
   // a plain discard they didn't ask for).
   bool _riichiMode = false;
 
-  // Hana tiles nuku'd as a direct result of the most recent user action
-  // (the viewer's own draw/kita/kan, or any CPU turns that action set off),
-  // shown as a small popup near "自分の手牌" so it's visible on-screen that
-  // it happened (STEP7: hana are auto-nuku'd with no decision, so without
-  // this there'd be no visible record besides the seat's nuki-tile badge).
+  // Hana or kita tiles nuku'd as a direct result of the most recent user
+  // action (the viewer's own draw/kita/kan, or any CPU turns that action
+  // set off), shown as a small animated popup near "自分の手牌" so it's
+  // visible on-screen that it happened — hana are auto-nuku'd with no
+  // decision at all, and even a deliberate kita 抜く is easy to miss
+  // against the seat's own small, easy-to-miss nuki-tile badge.
   // Cleared at the start of the next user action rather than on a timer —
   // a timer would leave one pending at test teardown unless every affected
   // test remembered to flush it (see this file's git history for that
   // exact problem with an earlier SnackBar-based version of this).
-  List<({int player, HanaTile tile})> _hanaPopups = [];
+  List<({int player, Tile tile})> _nukiPopups = [];
 
-  /// Runs [action] (an engine call for [player]) and appends any hana
-  /// tiles it newly nuku's to [_hanaPopups]. Covers every engine call that
-  /// can draw a replacement tile mid-call and so might transparently nuku
-  /// a hana along the way: a plain draw, a kita nuku (mid-round or haipai),
-  /// and a kan's post-declaration replacement draw.
-  void _trackHana(int player, void Function() action) {
+  /// Runs [action] (an engine call for [player]) and appends any hana or
+  /// kita tiles it newly nuku's to [_nukiPopups]. Covers every engine call
+  /// that can draw a replacement tile mid-call and so might transparently
+  /// nuku a hana along the way, plus [GameState.nukiKita] itself: a plain
+  /// draw, a kita nuku (mid-round or haipai, viewer or CPU), and a kan's
+  /// post-declaration replacement draw.
+  void _trackNuki(int player, void Function() action) {
     final before = _state.nukiTiles[player].length;
     action();
     for (final tile in _state.nukiTiles[player].skip(before)) {
-      if (tile is HanaTile) _hanaPopups.add((player: player, tile: tile));
+      if (tile is HanaTile || tile is KitaTile) _nukiPopups.add((player: player, tile: tile));
     }
   }
 
@@ -177,7 +181,7 @@ class _GameScreenState extends State<GameScreen> {
     if (!_state.isOver &&
         _state.currentPlayerIndex == widget.viewerIndex &&
         _state.phase == TurnPhase.awaitingDraw) {
-      _trackHana(widget.viewerIndex, _state.drawForCurrentPlayer);
+      _trackNuki(widget.viewerIndex, _state.drawForCurrentPlayer);
     }
   }
 
@@ -194,8 +198,8 @@ class _GameScreenState extends State<GameScreen> {
   /// discard the viewer could still react to.
   void _nukiKita() {
     setState(() {
-      _hanaPopups = [];
-      _trackHana(_state.currentPlayerIndex, _state.nukiKita);
+      _nukiPopups = [];
+      _trackNuki(_state.currentPlayerIndex, _state.nukiKita);
       _resolveKitaDecisionsForCpu();
       if (_resolveReactionsToLastDiscard()) return;
       _runCpuTurns();
@@ -208,8 +212,8 @@ class _GameScreenState extends State<GameScreen> {
   /// to) moving afterward.
   void _keepKita() {
     setState(() {
-      _hanaPopups = [];
-      _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
+      _nukiPopups = [];
+      _state.keepDrawnKita(); // never itself draws — nothing to _trackNuki here.
       _resolveKitaDecisionsForCpu();
       if (_resolveReactionsToLastDiscard()) return;
       _runCpuTurns();
@@ -221,7 +225,7 @@ class _GameScreenState extends State<GameScreen> {
     if (_riichiMode) {
       if (!_state.canDeclareRiichiWith(tile)) return; // only a tenpai-preserving tile is valid.
       setState(() {
-        _hanaPopups = [];
+        _nukiPopups = [];
         _state.declareRiichiAndDiscard(tile);
         _riichiMode = false;
         _advanceAfterDiscard();
@@ -229,7 +233,7 @@ class _GameScreenState extends State<GameScreen> {
       return;
     }
     setState(() {
-      _hanaPopups = [];
+      _nukiPopups = [];
       _state.discard(tile);
       _advanceAfterDiscard();
     });
@@ -241,16 +245,16 @@ class _GameScreenState extends State<GameScreen> {
 
   void _ankan(Tile tile) {
     setState(() {
-      _hanaPopups = [];
-      _trackHana(_state.currentPlayerIndex, () => _state.declareAnkan(tile));
+      _nukiPopups = [];
+      _trackNuki(_state.currentPlayerIndex, () => _state.declareAnkan(tile));
       _riichiMode = false; // the hand just changed; any pending riichi pick is stale.
     });
   }
 
   void _shouminkan(Tile tile) {
     setState(() {
-      _hanaPopups = [];
-      _trackHana(_state.currentPlayerIndex, () => _state.declareShouminkan(tile));
+      _nukiPopups = [];
+      _trackNuki(_state.currentPlayerIndex, () => _state.declareShouminkan(tile));
       _riichiMode = false;
     });
   }
@@ -357,7 +361,7 @@ class _GameScreenState extends State<GameScreen> {
           canPon && shouldCall(handBeforeCall, _hypotheticalPonHand(player, calledTile), _cpuDifficulty);
 
       if (wantsKan) {
-        _trackHana(player, () => _state.declareDaiminkan(player));
+        _trackNuki(player, () => _state.declareDaiminkan(player));
       } else if (wantsPon) {
         _state.declarePon(player); // never itself draws.
       } else {
@@ -400,28 +404,28 @@ class _GameScreenState extends State<GameScreen> {
 
   void _ron() {
     setState(() {
-      _hanaPopups = [];
+      _nukiPopups = [];
       _state.declareRon(widget.viewerIndex);
     });
   }
 
   void _pon() {
     setState(() {
-      _hanaPopups = [];
+      _nukiPopups = [];
       _state.declarePon(widget.viewerIndex);
     });
   }
 
   void _kan() {
     setState(() {
-      _hanaPopups = [];
-      _trackHana(widget.viewerIndex, () => _state.declareDaiminkan(widget.viewerIndex));
+      _nukiPopups = [];
+      _trackNuki(widget.viewerIndex, () => _state.declareDaiminkan(widget.viewerIndex));
     });
   }
 
   void _declineReaction() {
     setState(() {
-      _hanaPopups = [];
+      _nukiPopups = [];
       _declinedReactionDiscarderIndex = _state.lastDiscarderIndex;
       _declinedReactionPileLength = _state.discardPiles[_state.lastDiscarderIndex].length;
       _advanceAfterDiscard();
@@ -430,7 +434,7 @@ class _GameScreenState extends State<GameScreen> {
 
   void _declareTsumo() {
     setState(() {
-      _hanaPopups = [];
+      _nukiPopups = [];
       _state.declareTsumo();
     });
   }
@@ -439,7 +443,7 @@ class _GameScreenState extends State<GameScreen> {
   /// was 半荘's last hand, deals and swaps in the next 局's [GameState] —
   /// only ever called when [widget.match] is non-null (see the "次局へ"
   /// button in [build]). Resets every piece of per-round UI state
-  /// ([_riichiMode], the decline tracking, [_hanaPopups]) since none of it
+  /// ([_riichiMode], the decline tracking, [_nukiPopups]) since none of it
   /// means anything against a brand new round.
   ///
   /// Needs the same [_runCpuTurns] call as [initState] and for the same
@@ -450,7 +454,7 @@ class _GameScreenState extends State<GameScreen> {
     final match = widget.match!;
     setState(() {
       match.advance(_state);
-      _hanaPopups = [];
+      _nukiPopups = [];
       _riichiMode = false;
       _declinedReactionDiscarderIndex = null;
       _declinedReactionPileLength = null;
@@ -476,9 +480,9 @@ class _GameScreenState extends State<GameScreen> {
         melds: _state.currentHand.melds,
       );
       if (shouldKeepDrawnKita(hypotheticalHand, _cpuDifficulty)) {
-        _state.keepDrawnKita(); // never itself draws — nothing to _trackHana here.
+        _state.keepDrawnKita(); // never itself draws — nothing to _trackNuki here.
       } else {
-        _trackHana(player, _state.nukiKita);
+        _trackNuki(player, _state.nukiKita);
       }
     }
   }
@@ -498,7 +502,7 @@ class _GameScreenState extends State<GameScreen> {
   void _runCpuTurns() {
     while (!_state.isOver && _state.currentPlayerIndex != widget.viewerIndex) {
       if (_state.phase == TurnPhase.awaitingDraw) {
-        _trackHana(_state.currentPlayerIndex, _state.drawForCurrentPlayer);
+        _trackNuki(_state.currentPlayerIndex, _state.drawForCurrentPlayer);
         if (_state.isOver) return; // exhaustive draw mid-loop.
         _resolveKitaDecisionsForCpu();
         if (_state.isOver) return; // exhaustive draw while resolving kita.
@@ -667,37 +671,13 @@ class _GameScreenState extends State<GameScreen> {
                     ],
                   ),
                 ),
-              if (_hanaPopups.isNotEmpty)
+              if (_nukiPopups.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Wrap(
                     spacing: 6,
                     runSpacing: 4,
-                    children: [
-                      for (final popup in _hanaPopups)
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.pink.shade50,
-                            border: Border.all(color: Colors.pink.shade200),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SizedBox(
-                                  width: 20,
-                                  height: 26,
-                                  child: FittedBox(fit: BoxFit.contain, child: TileView(popup.tile)),
-                                ),
-                                const SizedBox(width: 4),
-                                Text('プレイヤー${popup.player}が${popup.tile.label}を抜きました'),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
+                    children: [for (final popup in _nukiPopups) _NukiPopupBadge(popup: popup)],
                   ),
                 ),
               Expanded(
@@ -769,6 +749,63 @@ class _GameScreenState extends State<GameScreen> {
                     : [...view.ownConcealedTiles, pendingKitaTile],
                 melds: view.melds[widget.viewerIndex],
                 onDiscard: canDiscard ? _discard : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single [_GameScreenState._nukiPopups] entry, rendered with a brief
+/// pop-in (scale + fade) entrance: since the popup list is always cleared
+/// then freshly repopulated within the same [State.setState] call, a badge
+/// for a given nuki is a genuinely new widget in the tree on the frame it
+/// first appears, so [TweenAnimationBuilder] restarting its animation from
+/// [State.initState] lines up exactly with "just happened" — no manual
+/// replay trigger needed. Colored and headlined by hana vs kita (ハナ in
+/// pink, 北 in amber) so the category reads at a glance, with the specific
+/// tile (its season, for hana) as the supporting detail.
+class _NukiPopupBadge extends StatelessWidget {
+  final ({int player, Tile tile}) popup;
+
+  const _NukiPopupBadge({required this.popup});
+
+  @override
+  Widget build(BuildContext context) {
+    final isKita = popup.tile is KitaTile;
+    final kindLabel = isKita ? '北' : 'ハナ';
+    final color = isKita ? Colors.amber : Colors.pink;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutBack,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0).toDouble(), // num.clamp returns num, Opacity needs double.
+        child: Transform.scale(scale: t, child: child),
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color.shade50,
+          border: Border.all(color: color.shade200),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 26,
+                child: FittedBox(fit: BoxFit.contain, child: TileView(popup.tile)),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '$kindLabel！プレイヤー${popup.player}が${popup.tile.label}を抜きました',
+                style: TextStyle(fontWeight: FontWeight.bold, color: color.shade900),
               ),
             ],
           ),

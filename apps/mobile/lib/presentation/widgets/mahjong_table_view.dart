@@ -174,9 +174,13 @@ class _SeatLabel extends StatelessWidget {
     final isRiichi = view.riichiPlayers.contains(playerIndex);
     final isTurn = view.currentPlayerIndex == playerIndex;
     final nuki = view.nukiTiles[playerIndex];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    // Nuki tiles sit to this seat's right (not stacked below the name),
+    // same relative position on every seat regardless of which table edge
+    // it's pinned to — a lasting per-seat record of every hana/kita nuku'd
+    // so far, distinct from the transient pop-in reaction badges.
+    return Row(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         DecoratedBox(
           decoration: BoxDecoration(
@@ -193,7 +197,7 @@ class _SeatLabel extends StatelessWidget {
         ),
         if (nuki.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.only(left: 4),
             child: SizedBox(
               height: 22,
               child: Row(

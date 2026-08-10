@@ -348,6 +348,26 @@ void main() {
     expect(find.textContaining('プレイヤー0が夏を抜きました'), findsOneWidget);
   });
 
+  testWidgets('抜く shows a 北 popup too, not just hana', (tester) async {
+    // Regression: _trackHana (now _trackNuki) only ever added HanaTile
+    // entries to the popup list, so a deliberate 北 nuku — easy to miss
+    // against the seat's own small nuki-tile badge — got no on-screen
+    // reaction at all, unlike an auto-nuku'd hana.
+    final hands = [
+      Hand(concealedTiles: filler(pin, 3, 13)),
+      Hand(concealedTiles: filler(sou, 3, 13)),
+      Hand(concealedTiles: filler(man, 1, 13)),
+    ];
+    final wall = Wall([const KitaTile(), pin(9), pin(2), pin(2)]);
+    final state = GameState(hands: hands, wall: wall, dealerIndex: 0);
+
+    await tester.pumpWidget(MaterialApp(home: GameScreen(state: state)));
+    await tester.tap(find.text('抜く'));
+    await tester.pump();
+
+    expect(find.textContaining('北！プレイヤー0が北を抜きました'), findsOneWidget);
+  });
+
   testWidgets('a CPU\'s kita decision already pending at mount (e.g. from haipai) resolves silently before the viewer sees it', (tester) async {
     final hands = [
       Hand(concealedTiles: filler(pin, 3, 13)),
