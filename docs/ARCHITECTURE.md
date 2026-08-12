@@ -398,3 +398,9 @@ fishing_reports + weather + tide  →  特徴量エンジニアリング
 | `NEXT_PUBLIC_APP_NAME` | アプリ表示名 |
 
 Phase2以降で追加予定: `WEATHER_API_KEY`, `TIDE_API_KEY`, `LLM_API_KEY`, `MAPS_API_KEY`, `CRON_SECRET`, `NEXTAUTH_SECRET` 等。APIキーはフロントエンドへ露出させない（42項）。
+
+## 10. ホスティング
+
+指示書49項ではVercel+Supabaseを候補として挙げているが、本プロジェクトではアカウント管理の
+簡便さを優先し **Railway** (Next.jsアプリ + PostgreSQL + 将来のCronジョブを1アカウントで
+一元管理) を採用する。デプロイ手順は `docs/DEPLOYMENT.md` を参照。

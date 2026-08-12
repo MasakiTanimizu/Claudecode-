@@ -3,6 +3,7 @@
 兵庫県・大阪府・和歌山県の釣果情報を収集・分析し、毎日最新の釣果ニュースを配信するAI搭載の釣り情報アプリ（開発中）。
 
 最終目標や詳細な機能要件は `docs/ARCHITECTURE.md` と `docs/DEVELOPMENT_LOG.md` を参照してください。
+デプロイ手順(Railway)は `docs/DEPLOYMENT.md` を参照してください。
 
 ## 技術構成
 

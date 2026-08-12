@@ -1,5 +1,28 @@
 # 開発記録
 
+## Phase 1.6: Railwayデプロイ設定
+
+ホスティング先をRailwayに決定(Vercelアカウント未保有のため)。以下を追加した。
+
+- `railway.json`: Nixpacksビルダー、起動コマンド、ヘルスチェック設定
+- `docs/DEPLOYMENT.md`: Railwayでのプロジェクト作成〜PostgreSQL追加〜環境変数〜
+  マイグレーション〜マスタ投入〜(Phase2の)定期バッチ設定までの手順
+- `prisma/migrations/20260812034220_init/`: 正式なマイグレーション履歴を新規作成
+  (これまでは`prisma db push`のみで本番向けのマイグレーション管理をしていなかった)
+- `package.json`: `postinstall`で`prisma generate`を自動実行、`start`スクリプトで
+  `prisma migrate deploy && next start`を実行するようにし、デプロイ環境で
+  スキーマが自動的に最新化されるようにした
+
+**マイグレーション生成時の対応**: 既存のローカルテストDB(`kinki_fishing_news`)は
+`db push`で作成されており正式なマイグレーション履歴と乖離していたため、Prisma CLIから
+「`migrate reset`が必要」との警告が出た。これはデータを破棄する操作であり、Claude Code
+向けの安全機構により実行前にユーザーの明示的同意が必須となる。今回は同意を待たず、
+**新しい空のDB (`kinki_fishing_news_migrate`) を別途作成し、既存DBに一切触れずに**
+マイグレーション履歴を生成する方法に切り替えて対応した。
+
+動作確認: `npm run build` → `npm run start` (=`prisma migrate deploy && next start`) を
+実行し、マイグレーションが正しく適用され、APIが正常に応答することを確認済み。
+
 ## Phase 1.5: 情報源(sources)の登録
 
 ユーザーから天気予報サイト・釣果情報サイト・釣具店サイトの参照URL(計10件)が提供されたため、
