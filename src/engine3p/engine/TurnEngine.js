@@ -14,8 +14,11 @@ import { isComplete, isTenpai, getWinningTiles } from '../hand/HandParser.js';
 import { tileKey, isNorth } from '../tiles/Tiles.js';
 import { evaluateYaku } from '../yaku/YakuEngine.js';
 import { computeFu, computeBasePoints, computeWinPayments, applyHonba, resolveNotenPayments } from '../scoring/ScoreEngine.js';
+import { computeDoraHan } from '../scoring/DoraHan.js';
+import { computeSpringChips, getActiveSeasons, computeAutumnBonusHan, applySummerRankUp } from '../scoring/SeasonEffects.js';
 import { computeChips } from '../chips/ChipEngine.js';
 import { applyScoreDelta, applyChipDelta } from '../state/ScoreState.js';
+import { markHakuPotchiIfDrawn } from '../state/WhitePotchiState.js';
 
 export function seatWindOf(seat, dealerSeat) {
   // 0 = East (dealer), 1 = South, 2 = West, rotating from the dealer.
@@ -29,8 +32,13 @@ function isMenzenNow(player) {
 export function drawForTurn(game, seat) {
   const tile = drawFromWall(game.wall);
   if (!tile) return null;
-  game.players[seat].hand.push(tile);
+  const player = game.players[seat];
+  player.hand.push(tile);
   game.round.turn = seat;
+  game.whitePotchi = markHakuPotchiIfDrawn(game.whitePotchi, seat, tile, {
+    riichiActive: player.riichi.active,
+    riichiEverDeclared: player.riichi.declaredAtTurn !== null,
+  });
   return tile;
 }
 
@@ -76,6 +84,15 @@ export function declareRiichi(game, seat, { open = false } = {}) {
   player.riichi.declaredAtTurn = game.round.turn;
 }
 
+function markReplacementPotchi(game, seat, replacement) {
+  if (!replacement) return;
+  const player = game.players[seat];
+  game.whitePotchi = markHakuPotchiIfDrawn(game.whitePotchi, seat, replacement, {
+    riichiActive: player.riichi.active,
+    riichiEverDeclared: player.riichi.declaredAtTurn !== null,
+  });
+}
+
 export function declareKita(game, seat, tileId) {
   const player = game.players[seat];
   const idx = player.hand.findIndex((t) => t.id === tileId && isNorth(t));
@@ -85,9 +102,11 @@ export function declareKita(game, seat, tileId) {
   clearAllIppatsu(game);
   const replacement = drawReplacement(game.wall);
   if (replacement) player.hand.push(replacement);
+  markReplacementPotchi(game, seat, replacement);
   return { extracted: tile, replacement };
 }
 
+// spec section 29: 春を抜いた瞬間、抜いている季節牌の数だけ祝儀を獲得する。
 export function declareFlowerDraw(game, seat, tileId) {
   const player = game.players[seat];
   const idx = player.hand.findIndex((t) => t.id === tileId && t.suit === 'f');
@@ -95,10 +114,20 @@ export function declareFlowerDraw(game, seat, tileId) {
   const [tile] = player.hand.splice(idx, 1);
   player.flowerTiles.push(tile);
   game.flower.drawnBySeat[seat].push(tile);
+
+  let springChips = 0;
+  if (tile.rank === 1 /* 春 */) {
+    springChips = computeSpringChips(player.flowerTiles.length);
+    const delta = [0, 0, 0];
+    delta[seat] = springChips;
+    game.chip = applyChipDelta(game.chip, delta);
+  }
+
   clearAllIppatsu(game);
   const replacement = drawReplacement(game.wall);
   if (replacement) player.hand.push(replacement);
-  return { extracted: tile, replacement };
+  markReplacementPotchi(game, seat, replacement);
+  return { extracted: tile, replacement, springChips };
 }
 
 function clearAllIppatsu(game) {
@@ -175,14 +204,24 @@ export function resolveWin(game, winCheck) {
   const decomposition = yakuResult.decomposition ?? { melds: [], pair: null };
   const isChiitoitsuWin = yakuResult.yakuList.some((y) => y.name === '七対子');
 
-  const doraHan = 0; // Regular dora count -> han is Phase 2 wiring alongside kan-dora rules.
+  const activeSeasons = getActiveSeasons(player.flowerTiles, game.round.doraIndicators, game.round.uraDoraIndicators);
+
+  const doraResult = computeDoraHan({
+    handTiles: ctx.concealedTiles,
+    doraIndicators: game.round.doraIndicators,
+    uraDoraIndicators: game.round.uraDoraIndicators,
+    riichiActive: player.riichi.active,
+    kitaCount: player.kitaTiles.length,
+  });
+  const autumnBonusHan = computeAutumnBonusHan(ctx.concealedTiles, activeSeasons);
+
   const fu = computeFu(decomposition, ctx.calledMelds, {
     ...ctx,
     hasPinfu: yakuResult.yakuList.some((y) => y.name === '平和'),
     isChiitoitsu: isChiitoitsuWin,
   });
-  const han = yakuResult.han + doraHan;
-  const base = computeBasePoints(fu, han);
+  const han = yakuResult.han + doraResult.total + autumnBonusHan;
+  const base = applySummerRankUp(computeBasePoints(fu, han), activeSeasons);
 
   const { deltas } = computeWinPayments({
     fu,
@@ -219,7 +258,16 @@ export function resolveWin(game, winCheck) {
   }, game.ruleConfig);
   game.chip = applyChipDelta(game.chip, [seat === 0 ? chipResult.total : 0, seat === 1 ? chipResult.total : 0, seat === 2 ? chipResult.total : 0]);
 
-  return { fu, han, base, scoreDeltas: withHonba, chipResult, yakuList: yakuResult.yakuList };
+  return {
+    fu,
+    han,
+    base,
+    scoreDeltas: withHonba,
+    chipResult,
+    yakuList: yakuResult.yakuList,
+    doraResult,
+    activeSeasons,
+  };
 }
 
 export function resolveExhaustiveDraw(game) {

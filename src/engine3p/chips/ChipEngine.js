@@ -20,8 +20,11 @@ export function computeChips(ctx, ruleConfig) {
 
   if (ctx.ippatsu) breakdown.push({ name: 'ippatsu', count: 1, chips: values.ippatsu });
 
+  // Blue tiles are always-hit ura-dora targets (spec section 5), so they
+  // fall into the same chip bucket as an actual ura-dora match.
   const uradoraCount = ctx.isMenzen && ctx.riichiActive
     ? countDoraMatches(ctx.handTiles ?? [], ctx.uraDoraIndicators ?? [])
+      + (ctx.handTiles ?? []).filter((t) => t.variant === 'blue').length
     : 0;
   if (uradoraCount > 0) breakdown.push({ name: 'uradora', count: uradoraCount, chips: uradoraCount * values.uradora });
 

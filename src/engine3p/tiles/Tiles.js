@@ -61,6 +61,10 @@ export function isHaku(tile) {
   return tile.suit === 'z' && tile.rank === 5;
 }
 
+export function isHakuPotchi(tile) {
+  return isHaku(tile) && tile.variant === 'potchi';
+}
+
 export function isSimple(tile) {
   if (tile.suit === 'z' || tile.suit === 'f') return false;
   if (tile.suit === 'm') return false; // only 1/9 exist, always terminal
@@ -77,11 +81,17 @@ export function isTerminalOrHonor(tile) {
   return isTerminal(tile) || isHonor(tile);
 }
 
+// Suited tiles (man/pin/sou) fall back to a 'black' skin for the
+// unassigned copies of a rank that has any special-map entry (spec
+// section 5). Honor/flower tiles never get a 'black' fallback — the
+// only honor variant is the haku-potchi tag, and unassigned copies of
+// a tagged honor tile are just ordinary (variant: null).
+const BLACK_FALLBACK_SUITS = new Set(['m', 'p', 's']);
+
 // Builds the full 112-tile set as plain, immutable-ish tile objects.
 // `ruleConfig.RULE_SPECIAL_TILE_MAP` decides which copies of which
-// suited tiles are red/blue variants; remaining copies of a tile that
-// appears in the map become 'black' (visually distinct, same value),
-// tiles not mentioned in the map are ordinary (variant: null).
+// tiles get a variant tag (red/blue for suited number tiles, 'potchi'
+// for the one haku tile that is 白ポッチ per spec section 17).
 export function createTileSet(ruleConfig) {
   const specialMap = ruleConfig.RULE_SPECIAL_TILE_MAP ?? [];
   const tiles = [];
@@ -94,11 +104,10 @@ export function createTileSet(ruleConfig) {
       for (let i = 0; i < entry.count; i++) variantAssignment.push(entry.variant);
     }
     const hasSpecial = entries.length > 0;
+    const fallback = hasSpecial && BLACK_FALLBACK_SUITS.has(suit) ? 'black' : null;
 
     for (let copyIndex = 0; copyIndex < copies; copyIndex++) {
-      const variant = copyIndex < variantAssignment.length
-        ? variantAssignment[copyIndex]
-        : (hasSpecial ? 'black' : null);
+      const variant = copyIndex < variantAssignment.length ? variantAssignment[copyIndex] : fallback;
       tiles.push({
         id: `${tileKey(suit, rank)}-${seq++}`,
         suit,

@@ -53,4 +53,10 @@ describe('Tiles', () => {
     expect(s9.filter((t) => t.variant === 'red').length).toBe(2);
     expect(s9.filter((t) => t.variant === 'black').length).toBe(2);
   });
+
+  it('tags exactly one haku tile as potchi and leaves the other 3 ordinary (no black fallback for honors)', () => {
+    const haku = tiles.filter((t) => t.suit === 'z' && t.rank === 5);
+    expect(haku.filter((t) => t.variant === 'potchi').length).toBe(1);
+    expect(haku.filter((t) => t.variant === null).length).toBe(3);
+  });
 });

@@ -1,6 +1,8 @@
 // Central source of tunable numbers for the 3-player ruleset (spec section 58).
 // Nothing in the engine should hardcode these values directly.
 
+const HAKU_POTCHI_COUNT = 1;
+
 export const DEFAULT_RULE_CONFIG = {
   RULE_NORTH_COUNT: 4,
   RULE_FLOWER_COUNT: 4,
@@ -43,16 +45,18 @@ export const DEFAULT_RULE_CONFIG = {
     fourFlowerFourNorth: 50,
   },
 
-  // Which physical copies of which tiles are red/blue/black variants.
-  // Configurable per spec section 5 ("設定ファイルから変更できる設計").
+  // Which physical copies of which tiles are red/blue/potchi variants.
+  // Configurable per spec section 5 ("設定ファイルから変更できる設計") and
+  // section 17 (白ポッチ — one of the 4 haku tiles).
   RULE_SPECIAL_TILE_MAP: [
     { suit: 'p', rank: 5, variant: 'red', count: 1 },
     { suit: 'p', rank: 5, variant: 'blue', count: 1 },
     { suit: 's', rank: 5, variant: 'red', count: 1 },
     { suit: 's', rank: 5, variant: 'blue', count: 1 },
+    { suit: 'z', rank: 5, variant: 'potchi', count: HAKU_POTCHI_COUNT },
   ],
 
-  RULE_HAKU_POTCHI_COUNT: 1,
+  RULE_HAKU_POTCHI_COUNT: HAKU_POTCHI_COUNT,
 
   RULE_STARTING_SCORE: 35000,
 

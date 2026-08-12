@@ -3,10 +3,13 @@ import { createRuleConfig } from '../rules/RuleConfig.js';
 import { createPlayerState } from '../state/PlayerState.js';
 import { createRoundState } from '../state/RoundState.js';
 import { createScoreState, createChipState } from '../state/ScoreState.js';
+import { createFlowerState } from '../state/FlowerState.js';
+import { createWhitePotchiState } from '../state/WhitePotchiState.js';
 import {
   drawForTurn,
   discardTile,
   declareKita,
+  declareFlowerDraw,
   checkTsumoWin,
   checkRonWin,
   resolveWin,
@@ -35,7 +38,8 @@ function makeGame({ liveWall = [] } = {}) {
       liveWall,
       deadWall: { doraIndicators: [], uraDoraIndicators: [], replacementPool: [t('p', 9)] },
     },
-    flower: { drawnBySeat: [[], [], []] },
+    flower: createFlowerState(3),
+    whitePotchi: createWhitePotchiState(3),
     shubariichi: { tier: [null, null, null] },
   };
 }
@@ -147,5 +151,43 @@ describe('TurnEngine', () => {
     expect(canDeclareChi(null, null, { suit: 'z', rank: 5 })).toBe(false);
     expect(canDeclareChi(null, null, { suit: 'f', rank: 1 })).toBe(false);
     expect(canDeclareChi(null, null, { suit: 'p', rank: 4 })).toBe(true);
+  });
+
+  it('awards spring chips equal to the total flowers held at the moment spring is extracted', () => {
+    const game = makeGame();
+    const summer = t('f', 2);
+    const spring = t('f', 1);
+    game.players[0].hand = [summer];
+    declareFlowerDraw(game, 0, summer.id);
+    expect(game.chip[0]).toBe(0); // summer alone does not burst chips
+
+    game.players[0].hand.push(spring);
+    const { springChips } = declareFlowerDraw(game, 0, spring.id);
+    expect(springChips).toBe(2); // summer + spring held at this moment
+    expect(game.chip[0]).toBe(2);
+  });
+
+  it('adds regular dora matches to the winning hands han', () => {
+    const game = makeGame();
+    game.round.doraIndicators = [t('p', 1)]; // dora is p2
+    game.players[1].hand = tanyaoTiles();
+
+    const win = checkTsumoWin(game, 1);
+    expect(win.canWin).toBe(true);
+    const result = resolveWin(game, win);
+    // 3 p2 tiles in the hand: one in the 234p sequence, two as the pair.
+    expect(result.doraResult.normalDora).toBe(3);
+    expect(result.han).toBe(win.yakuResult.han + 3);
+  });
+
+  it('adds nuki-dora han equal to the winners extracted kita count', () => {
+    const game = makeGame();
+    game.players[1].hand = tanyaoTiles();
+    game.players[1].kitaTiles = [t('z', 4), t('z', 4)];
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.doraResult.nukiDora).toBe(2);
+    expect(result.han).toBe(win.yakuResult.han + 2);
   });
 });
