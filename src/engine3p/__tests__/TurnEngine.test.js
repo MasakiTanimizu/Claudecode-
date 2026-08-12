@@ -18,6 +18,8 @@ import {
   refreshFuriten,
 } from '../engine/TurnEngine.js';
 
+const rules = createRuleConfig();
+
 function t(suit, rank, variant = null) {
   return { id: `${suit}${rank}-${Math.random()}`, suit, rank, variant };
 }
@@ -146,11 +148,17 @@ describe('TurnEngine', () => {
     expect(game.score[1]).toBeLessThan(before[1]);
   });
 
-  it('never allows chi on man/honor/flower tiles, only pin/sou', () => {
-    expect(canDeclareChi(null, null, { suit: 'm', rank: 1 })).toBe(false);
-    expect(canDeclareChi(null, null, { suit: 'z', rank: 5 })).toBe(false);
-    expect(canDeclareChi(null, null, { suit: 'f', rank: 1 })).toBe(false);
-    expect(canDeclareChi(null, null, { suit: 'p', rank: 4 })).toBe(true);
+  it('never allows chi — it is removed from this ruleset (RULE_CHI_ENABLED: false)', () => {
+    expect(canDeclareChi(rules, { suit: 'p', rank: 4 })).toBe(false);
+    expect(canDeclareChi(rules, { suit: 'm', rank: 1 })).toBe(false);
+  });
+
+  it('would still exclude man/honor/flower even if chi were re-enabled for a variant ruleset', () => {
+    const chiEnabled = createRuleConfig({ RULE_CHI_ENABLED: true });
+    expect(canDeclareChi(chiEnabled, { suit: 'p', rank: 4 })).toBe(true);
+    expect(canDeclareChi(chiEnabled, { suit: 'm', rank: 1 })).toBe(false);
+    expect(canDeclareChi(chiEnabled, { suit: 'z', rank: 5 })).toBe(false);
+    expect(canDeclareChi(chiEnabled, { suit: 'f', rank: 1 })).toBe(false);
   });
 
   it('awards spring chips equal to the total flowers held at the moment spring is extracted', () => {

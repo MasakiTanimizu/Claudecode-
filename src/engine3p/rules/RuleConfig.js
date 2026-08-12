@@ -19,6 +19,11 @@ export const DEFAULT_RULE_CONFIG = {
   RULE_OPEN_RIICHI_HAN: 2,
   RULE_FURO_RIICHI_HAN: 0,
 
+  // House rule: chi is removed entirely. Pon and kan (open/daiminkan)
+  // share equal call priority; ron always outranks both.
+  RULE_CHI_ENABLED: false,
+  RULE_PON_KAN_EQUAL_PRIORITY: true,
+
   RULE_ALICE_CHIP: 1,
 
   RULE_SHUBA_MULTIPLIER: 2,

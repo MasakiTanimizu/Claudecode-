@@ -134,8 +134,14 @@ function clearAllIppatsu(game) {
   for (const p of game.players) p.riichi.ippatsu = false;
 }
 
-export function canDeclareChi(caller, target, calledTile) {
-  // Chi only exists for pin/sou (man only has 1/9, no consecutive runs).
+// Chi is removed from this ruleset entirely (house rule). The check is
+// still config-gated (RULE_CHI_ENABLED) rather than deleted outright, in
+// keeping with the "everything is a RuleConfig switch" design (spec
+// section 58) — flip it back on for a future variant without touching
+// call-priority logic. Note man suit could never form a chi anyway
+// (only rank 1/9 exist), so this is never reachable for 'm' regardless.
+export function canDeclareChi(ruleConfig, calledTile) {
+  if (!ruleConfig.RULE_CHI_ENABLED) return false;
   if (calledTile.suit === 'm' || calledTile.suit === 'z' || calledTile.suit === 'f') return false;
   return true;
 }
