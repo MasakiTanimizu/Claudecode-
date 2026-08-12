@@ -1,0 +1,391 @@
+// 釣果ニュースAIアプリ DBスキーマ (指示書 35〜38項)
+// 方針:
+//  - 都道府県・魚種・釣法・タックル等はすべてマスタテーブルとして管理し、ハードコードしない
+//  - 実測値 (TEXT由来) と AI推定値 (IMAGE_AI等) は size_estimation_method 等のカラムで区別する
+//  - AI解析・AI予測は必ずモデル名/バージョン/入出力/信頼度を保持する (ai_analysis, ai_predictions)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// 地域マスタ (指示書 2項: ハードコードせずDBで管理し将来拡張可能にする)
+// ---------------------------------------------------------------------------
+
+model Prefecture {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  nameKana    String?  @map("name_kana")
+  isActive    Boolean  @default(false) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  cities        City[]
+  fishingSpots  FishingSpot[]
+  fishingReports FishingReport[]
+
+  @@map("prefectures")
+}
+
+model City {
+  id           Int      @id @default(autoincrement())
+  prefectureId Int      @map("prefecture_id")
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  prefecture     Prefecture      @relation(fields: [prefectureId], references: [id])
+  fishingSpots   FishingSpot[]
+  fishingReports FishingReport[]
+
+  @@unique([prefectureId, name])
+  @@map("cities")
+}
+
+model FishingSpot {
+  id           Int      @id @default(autoincrement())
+  prefectureId Int      @map("prefecture_id")
+  cityId       Int?     @map("city_id")
+  name         String
+  latitude     Decimal? @db.Decimal(9, 6)
+  longitude    Decimal? @db.Decimal(9, 6)
+  spotType     String?  @map("spot_type") // 例: 堤防, 磯, 海釣り施設, 河口 等
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  prefecture     Prefecture      @relation(fields: [prefectureId], references: [id])
+  city           City?           @relation(fields: [cityId], references: [id])
+  fishingReports FishingReport[]
+  weatherObservations Weather[]
+  tideObservations    Tide[]
+  aiPredictions       AiPrediction[]
+  userFishingLogs     UserFishingLog[]
+
+  @@map("fishing_spots")
+}
+
+// ---------------------------------------------------------------------------
+// 魚種・釣法・タックル マスタ (指示書 3, 12, 13項)
+// ---------------------------------------------------------------------------
+
+model FishSpecies {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  nameKana  String?  @map("name_kana")
+  category  String? // 例: 青物, 根魚, イカ類 等
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fishingReports FishingReport[]
+  aiPredictions  AiPrediction[]
+  userFishingLogs UserFishingLog[]
+
+  @@map("fish_species")
+}
+
+model FishingMethod {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  fishingReports FishingReport[]
+
+  @@map("fishing_methods")
+}
+
+model Bait {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  category  String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fishingReports FishingReport[]
+
+  @@map("baits")
+}
+
+model Lure {
+  id        Int      @id @default(autoincrement())
+  maker     String?
+  name      String
+  lureType  String?  @map("lure_type")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fishingReports FishingReport[]
+
+  @@map("lures")
+}
+
+model Rod {
+  id        Int      @id @default(autoincrement())
+  maker     String?
+  name      String
+  length    String?
+  action    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fishingReports FishingReport[]
+
+  @@map("rods")
+}
+
+model Reel {
+  id        Int      @id @default(autoincrement())
+  maker     String?
+  name      String
+  size      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fishingReports FishingReport[]
+
+  @@map("reels")
+}
+
+// ---------------------------------------------------------------------------
+// 情報源 (指示書 6項)
+// ---------------------------------------------------------------------------
+
+model Source {
+  id             Int       @id @default(autoincrement())
+  name           String
+  url            String
+  sourceType     String    @map("source_type") // 例: 釣具店公式, メーカー公式, 海釣り施設, メディア, ブログ, SNS
+  fetchMethod    String?   @map("fetch_method") // 例: API, RSS, SCRAPING_ALLOWED, MANUAL
+  fetchAllowed   Boolean   @default(false) @map("fetch_allowed")
+  trustScore     Int       @default(50) @map("trust_score") // 0-100, 管理画面から変更可能
+  lastFetchedAt  DateTime? @map("last_fetched_at")
+  lastError      String?   @map("last_error")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  fishingReports FishingReport[]
+
+  @@map("sources")
+}
+
+// ---------------------------------------------------------------------------
+// 釣果情報 (指示書 7, 36項) — 本アプリの中核データ
+// ---------------------------------------------------------------------------
+
+model FishingReport {
+  id       Int @id @default(autoincrement())
+  sourceId Int? @map("source_id")
+  sourceUrl String @map("source_url")
+
+  publishedAt DateTime? @map("published_at")
+  fishingDate DateTime? @map("fishing_date")
+
+  prefectureId  Int  @map("prefecture_id")
+  cityId        Int? @map("city_id")
+  fishingSpotId Int? @map("fishing_spot_id")
+
+  fishSpeciesId Int @map("fish_species_id")
+
+  catchCount  Int?     @map("catch_count")
+  minSize     Decimal? @map("min_size") @db.Decimal(6, 2)
+  maxSize     Decimal? @map("max_size") @db.Decimal(6, 2)
+  averageSize Decimal? @map("average_size") @db.Decimal(6, 2)
+  sizeUnit    String?  @map("size_unit") // cm, mm, kg, g
+
+  /// 実測値かAI推定値かを区別する (指示書 9, 10, 58項)
+  /// TEXT = 原文に明記, IMAGE_AI = 画像からのAI推定, UNKNOWN = 未取得
+  sizeEstimationMethod String @default("UNKNOWN") @map("size_estimation_method")
+
+  fishingMethodId Int? @map("fishing_method_id")
+
+  baitId   Int?    @map("bait_id")
+  baitRaw  String? @map("bait_raw")
+  lureId   Int?    @map("lure_id")
+  lureRaw  String? @map("lure_raw")
+  rodId    Int?    @map("rod_id")
+  reelId   Int?    @map("reel_id")
+  lineRaw    String? @map("line_raw")
+  leaderRaw  String? @map("leader_raw")
+  tackleRawText String? @map("tackle_raw_text")
+
+  timeOfDay String? @map("time_of_day")
+
+  originalText String @map("original_text")
+
+  confidenceScore Decimal @default(50) @map("confidence_score") @db.Decimal(5, 2)
+  isDuplicate     Boolean @default(false) @map("is_duplicate")
+  duplicateOfId   Int?    @map("duplicate_of_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  source        Source?        @relation(fields: [sourceId], references: [id])
+  prefecture    Prefecture     @relation(fields: [prefectureId], references: [id])
+  city          City?          @relation(fields: [cityId], references: [id])
+  fishingSpot   FishingSpot?   @relation(fields: [fishingSpotId], references: [id])
+  fishSpecies   FishSpecies    @relation(fields: [fishSpeciesId], references: [id])
+  fishingMethod FishingMethod? @relation(fields: [fishingMethodId], references: [id])
+  bait          Bait?          @relation(fields: [baitId], references: [id])
+  lure          Lure?          @relation(fields: [lureId], references: [id])
+  rod           Rod?           @relation(fields: [rodId], references: [id])
+  reel          Reel?          @relation(fields: [reelId], references: [id])
+
+  images     Image[]
+  aiAnalyses AiAnalysis[]
+
+  @@index([fishingDate])
+  @@index([fishSpeciesId])
+  @@index([fishingSpotId])
+  @@index([prefectureId])
+  @@map("fishing_reports")
+}
+
+model Image {
+  id              Int      @id @default(autoincrement())
+  fishingReportId Int      @map("fishing_report_id")
+  url             String
+  licenseNote     String?  @map("license_note")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  fishingReport FishingReport @relation(fields: [fishingReportId], references: [id], onDelete: Cascade)
+
+  @@map("images")
+}
+
+// ---------------------------------------------------------------------------
+// AI解析・AI予測 (指示書 8, 37, 38項) — 原文と分離し、モデル情報を必ず保持する
+// ---------------------------------------------------------------------------
+
+model AiAnalysis {
+  id              Int      @id @default(autoincrement())
+  fishingReportId Int      @map("fishing_report_id")
+  modelName       String   @map("model_name")
+  modelVersion    String   @map("model_version")
+  input           Json
+  output          Json
+  confidence      Decimal  @db.Decimal(5, 2)
+  executedAt      DateTime @default(now()) @map("executed_at")
+
+  fishingReport FishingReport @relation(fields: [fishingReportId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analysis")
+}
+
+model AiPrediction {
+  id              Int      @id @default(autoincrement())
+  fishSpeciesId   Int      @map("fish_species_id")
+  fishingSpotId   Int?     @map("fishing_spot_id")
+  targetDate      DateTime @map("target_date") @db.Date
+  expectationScore Int     @map("expectation_score") // 0-100
+  basis           Json // 例: {"recent_catch":25,"season":20,"tide":15,...}
+  modelName       String   @map("model_name")
+  modelVersion    String   @map("model_version")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  fishSpecies FishSpecies  @relation(fields: [fishSpeciesId], references: [id])
+  fishingSpot FishingSpot? @relation(fields: [fishingSpotId], references: [id])
+
+  @@index([targetDate])
+  @@map("ai_predictions")
+}
+
+// ---------------------------------------------------------------------------
+// 環境データ (指示書 18, 19項)
+// ---------------------------------------------------------------------------
+
+model Weather {
+  id                Int      @id @default(autoincrement())
+  fishingSpotId     Int      @map("fishing_spot_id")
+  observedAt        DateTime @map("observed_at")
+  temperature       Decimal? @db.Decimal(4, 1)
+  waterTemperature  Decimal? @map("water_temperature") @db.Decimal(4, 1)
+  precipitation     Decimal? @db.Decimal(5, 1)
+  condition         String?
+  windSpeed         Decimal? @map("wind_speed") @db.Decimal(4, 1)
+  windDirection     String?  @map("wind_direction")
+  waveHeight        Decimal? @map("wave_height") @db.Decimal(4, 1)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  fishingSpot FishingSpot @relation(fields: [fishingSpotId], references: [id])
+
+  @@index([fishingSpotId, observedAt])
+  @@map("weather")
+}
+
+model Tide {
+  id             Int      @id @default(autoincrement())
+  fishingSpotId  Int      @map("fishing_spot_id")
+  date           DateTime @db.Date
+  tideType       String?  @map("tide_type") // 大潮, 中潮, 小潮, 長潮, 若潮
+  highTideTimes  Json?    @map("high_tide_times")
+  lowTideTimes   Json?    @map("low_tide_times")
+  moonAge        Decimal? @map("moon_age") @db.Decimal(4, 1)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  fishingSpot FishingSpot @relation(fields: [fishingSpotId], references: [id])
+
+  @@unique([fishingSpotId, date])
+  @@map("tide")
+}
+
+// ---------------------------------------------------------------------------
+// ニュース・通知・ユーザー (指示書 14, 30, 31, 32項)
+// ---------------------------------------------------------------------------
+
+model News {
+  id             Int      @id @default(autoincrement())
+  newsDate       DateTime @unique @map("news_date") @db.Date
+  title          String
+  bodyMarkdown   String   @map("body_markdown")
+  highlights     Json?
+  publishedAt    DateTime? @map("published_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("news")
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  displayName String?  @map("display_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  notifications   Notification[]
+  userFishingLogs UserFishingLog[]
+
+  @@map("users")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  type      String
+  message   String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model UserFishingLog {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  fishingDate   DateTime @map("fishing_date")
+  fishingSpotId Int?     @map("fishing_spot_id")
+  fishSpeciesId Int?     @map("fish_species_id")
+  catchCount    Int?     @map("catch_count")
+  size          Decimal? @db.Decimal(6, 2)
+  comment       String?
+  trustScore    Decimal  @default(50) @map("trust_score") @db.Decimal(5, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user        User         @relation(fields: [userId], references: [id])
+  fishingSpot FishingSpot? @relation(fields: [fishingSpotId], references: [id])
+  fishSpecies FishSpecies? @relation(fields: [fishSpeciesId], references: [id])
+
+  @@map("user_fishing_logs")
+}
