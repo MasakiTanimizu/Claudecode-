@@ -1,5 +1,33 @@
 # 開発記録
 
+## Phase 1.7: robots.txt自動チェック機能
+
+本開発サンドボックスからは外部サイトのrobots.txtを確認できないため、実際にインターネットへ
+到達できる環境(Railwayデプロイ後)で実行することを前提に、robots.txtを自動確認する機能を実装した。
+
+- `src/lib/robots.ts`: `robots-parser`を使い、指定オリジンのrobots.txtを取得・解析するヘルパー。
+  取得失敗(404はrobots.txt不在=制限なしとして解釈、それ以外のエラーは判定不能として扱う)、
+  UAは`KinkiFishingNewsAIBot/0.1`として身元を偽らないようにした(指示書41項)。
+- `POST /api/sources/verify-robots`: 登録済み全sourcesを巡回し、robots.txtの判定結果に基づき
+  `fetch_allowed`/`fetch_method`/`notes`/`last_fetched_at`/`last_error`を更新する。
+  同一オリジンへの重複リクエストを避けるため、リクエスト単位でrobots.txtをキャッシュする。
+  管理画面(指示書33項)が未実装のため`ADMIN_API_SECRET`ヘッダー認証で保護し、
+  未設定時は常に503を返して無効化する(安全側のデフォルト)。
+  **重要**: このエンドポイントはrobots.txtの技術的判定のみを行う。著作権・利用規約の
+  遵守可否(指示書41項)は別途人手での確認が必要であり、自動判定はそれを代替しない。
+
+**動作確認**: ローカルではこのサンドボックスの通信制限により実際のrobots.txt取得はできないが、
+以下を確認した:
+- `ADMIN_API_SECRET`未設定時 → 503で無効化されることを確認
+- 誤ったシークレット → 401を確認
+- 正しいシークレット + 通信不可の状況 → 各sourceごとに`status: "error"`として
+  グレースフルに処理され、クラッシュせず200で結果を返すことを確認(実際にはHTTP 403で
+  失敗しているが、これは本サンドボックスのegressポリシーによるものであり、想定通りの挙動)
+- `npm run typecheck` / `npm run lint` / `npm run build` すべて成功
+
+デプロイ後、Railway環境から本エンドポイントを1回呼び出すことで、実際のrobots.txt判定結果に
+基づいて`sources`が更新される想定。
+
 ## Phase 1.6: Railwayデプロイ設定
 
 ホスティング先をRailwayに決定(Vercelアカウント未保有のため)。以下を追加した。
