@@ -154,13 +154,15 @@ model Reel {
 model Source {
   id             Int       @id @default(autoincrement())
   name           String
-  url            String
-  sourceType     String    @map("source_type") // 例: 釣具店公式, メーカー公式, 海釣り施設, メディア, ブログ, SNS
-  fetchMethod    String?   @map("fetch_method") // 例: API, RSS, SCRAPING_ALLOWED, MANUAL
+  url            String    @unique
+  sourceType     String    @map("source_type") // 例: 釣具店公式, メーカー公式, 海釣り施設, メディア, ブログ, SNS, 気象ポータル
+  fetchMethod    String?   @map("fetch_method") // 例: API, RSS, SCRAPING_ALLOWED, MANUAL, UNVERIFIED
   fetchAllowed   Boolean   @default(false) @map("fetch_allowed")
   trustScore     Int       @default(50) @map("trust_score") // 0-100, 管理画面から変更可能
   lastFetchedAt  DateTime? @map("last_fetched_at")
   lastError      String?   @map("last_error")
+  /// robots.txt・利用規約の確認状況や取得可否判断の根拠を記録する (指示書41項)
+  notes          String?   @map("notes")
   isActive       Boolean   @default(true) @map("is_active")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")

@@ -295,6 +295,8 @@ erDiagram
 
 Step 1〜4 では `prefectures, cities, fishing_spots, fish_species, fishing_methods, baits, lures, rods, reels, sources, fishing_reports, images` を実装対象とする。`ai_analysis, ai_predictions, weather, tide, news, notifications, users, user_fishing_logs` はスキーマとして定義するが、機能実装はPhase2以降。
 
+`sources` テーブルには `notes` カラムを追加し、robots.txt・利用規約の確認状況を記録できるようにしている(指示書41項)。
+
 ## 4. API一覧 (Step 1〜4 時点)
 
 | Method | Path | 説明 |
@@ -339,6 +341,22 @@ Phase2以降で `/api/predictions`, `/api/news`, `/api/chat`, `/api/admin/*`, `/
 | Agent7 ユーザーアシスタント | 自然言語質問への回答 | Phase3〜4 |
 
 各エージェントの出力は必ず `ai_analysis` / `ai_predictions` テーブルにモデル名・バージョン・入出力・信頼度とともに保存し、原文・実測値と区別する。
+
+## 6.5 情報源 (sources) 登録状況
+
+ユーザーから提供された参照URLを `sources` に登録済み(`prisma/seed.ts`)。ただし本開発環境は
+外部ネットワークへのアクセスが遮断されており、robots.txt・利用規約を確認できないため、
+**全件 `fetch_allowed=false`（要確認）**として登録している。実クロール実装前に、到達可能な
+環境で確認のうえ更新すること。
+
+| 情報源 | 種別 | 信頼度(暫定) |
+|---|---|---|
+| Yahoo!天気・災害 / 大阪の天気 | 気象ポータル | 85 |
+| フィッシングマックス（関西の釣果 / 釣果記事 / 南津守店） | 釣具店公式 | 95 |
+| エギCOM（エギ王）近畿の釣果情報 | メーカー公式 | 95 |
+| 釣果情報サイト カンパリ（関西エギング） | 釣りメディア | 80 |
+| つり具の上州屋 | 釣具店公式 | 95 |
+| 釣具のキャスティング / キャスティングオンラインストア | 釣具店公式 | 95 |
 
 ## 7. データ収集フロー (Phase2, 39項)
 

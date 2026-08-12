@@ -4,8 +4,11 @@
  * ここで投入するのは「マスタ(参照)データ」であり、釣果実績(fishing_reports)は含めない。
  * 釣果情報は指示書58項の原則により、実データの収集・登録によってのみ作成する。
  *
- * sources (情報源) は、ユーザーから提供される参照URLをもとに登録する方針のため、
- * このシードでは投入しない (docs/DEVELOPMENT_LOG.md 参照)。
+ * sources (情報源) はユーザーから提供された参照URLを登録する。ただし本開発環境からは
+ * 外部サイトのrobots.txt・利用規約を確認できない(ネットワーク制限)ため、
+ * 全件 fetchAllowed=false (要確認) として登録する。実際のクロール実装前に、
+ * 到達可能な環境でrobots.txt・利用規約を確認し、fetchAllowed/fetchMethodを更新すること
+ * (指示書41項)。
  */
 import { PrismaClient } from "@prisma/client";
 
@@ -97,10 +100,102 @@ async function seedFishingMethods() {
   }
 }
 
+const UNVERIFIED_NOTE =
+  "robots.txt/利用規約 未確認 (本開発環境は外部ネットワークへのアクセスが遮断されているため)。" +
+  "到達可能な環境で確認のうえ fetchAllowed を更新すること。";
+
+async function seedSources() {
+  const sources: {
+    name: string;
+    url: string;
+    sourceType: string;
+    trustScore: number;
+  }[] = [
+    {
+      name: "Yahoo!天気・災害",
+      url: "https://weather.yahoo.co.jp/weather/",
+      sourceType: "気象ポータル",
+      trustScore: 85,
+    },
+    {
+      name: "大阪の天気 - Yahoo!天気・災害",
+      url: "https://weather.yahoo.co.jp/weather/jp/27/6200.html",
+      sourceType: "気象ポータル",
+      trustScore: 85,
+    },
+    {
+      name: "フィッシングマックス 関西の釣果",
+      url: "https://fishingmax.co.jp/",
+      sourceType: "釣具店公式",
+      trustScore: 95,
+    },
+    {
+      name: "釣果記事 | フィッシングマックス",
+      url: "https://fishingmax.co.jp/fishingpost",
+      sourceType: "釣具店公式",
+      trustScore: 95,
+    },
+    {
+      name: "フィッシングマックス 店舗情報（南津守店）",
+      url: "https://fishingmax.co.jp/shoplist/tsumori",
+      sourceType: "釣具店公式",
+      trustScore: 95,
+    },
+    {
+      name: "エギCOM（エギ王）近畿の釣果情報",
+      url: "https://www.yamaria.com/community/catch/egiou/regions/5",
+      sourceType: "メーカー公式",
+      trustScore: 95,
+    },
+    {
+      name: "釣果情報サイト カンパリ（関西エギング）",
+      url: "https://fishing.ne.jp/fishingpost/area/kansai?howto=howto-eging",
+      sourceType: "釣りメディア",
+      trustScore: 80,
+    },
+    {
+      name: "つり具の上州屋",
+      url: "https://www.johshuya.co.jp/",
+      sourceType: "釣具店公式",
+      trustScore: 95,
+    },
+    {
+      name: "釣具のキャスティング",
+      url: "https://castingnet.jp/",
+      sourceType: "釣具店公式",
+      trustScore: 95,
+    },
+    {
+      name: "キャスティングオンラインストア",
+      url: "https://store.castingnet.jp/shop/default.aspx",
+      sourceType: "釣具店公式",
+      trustScore: 95,
+    },
+  ];
+
+  for (const s of sources) {
+    await prisma.source.upsert({
+      where: { url: s.url },
+      update: {
+        name: s.name,
+        sourceType: s.sourceType,
+        trustScore: s.trustScore,
+      },
+      create: {
+        ...s,
+        fetchMethod: "UNVERIFIED",
+        fetchAllowed: false,
+        notes: UNVERIFIED_NOTE,
+      },
+    });
+  }
+}
+
 async function main() {
   await seedPrefectures();
   await seedFishSpecies();
   await seedFishingMethods();
+  await seedSources();
   // eslint-disable-next-line no-console
   console.log("マスタデータの投入が完了しました。");
 }
