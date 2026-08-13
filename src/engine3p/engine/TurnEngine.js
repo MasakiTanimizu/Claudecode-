@@ -13,6 +13,7 @@ import { drawTile as drawFromWall, drawReplacement } from '../wall/Wall.js';
 import { isComplete, isTenpai, getWinningTiles } from '../hand/HandParser.js';
 import { tileKey, isNorth } from '../tiles/Tiles.js';
 import { evaluateYaku } from '../yaku/YakuEngine.js';
+import { detectYakuman, usesNorthTile } from '../yaku/Yakuman.js';
 import { computeFu, computeBasePoints, computeWinPayments, applyHonba, resolveNotenPayments } from '../scoring/ScoreEngine.js';
 import { computeDoraHan } from '../scoring/DoraHan.js';
 import { computeSpringChips, getActiveSeasons, computeAutumnBonusHan, applySummerRankUp } from '../scoring/SeasonEffects.js';
@@ -35,6 +36,12 @@ export function drawForTurn(game, seat) {
   const player = game.players[seat];
   player.hand.push(tile);
   game.round.turn = seat;
+
+  const isFirstDrawForSeat = !game.round.firstDrawDoneBySeat[seat];
+  game.round.firstDrawDoneBySeat[seat] = true;
+  game.round.totalDraws += 1;
+  game.round.lastDrawWasFirstUninterrupted = isFirstDrawForSeat && !game.round.anyCallMade;
+
   game.whitePotchi = markHakuPotchiIfDrawn(game.whitePotchi, seat, tile, {
     riichiActive: player.riichi.active,
     riichiEverDeclared: player.riichi.declaredAtTurn !== null,
@@ -152,6 +159,7 @@ export function checkTsumoWin(game, seat) {
     concealedTiles: player.hand,
     isTsumo: true,
     winTile: player.hand[player.hand.length - 1],
+    isFirstUninterruptedDraw: game.round.lastDrawWasFirstUninterrupted,
   });
 }
 
@@ -162,10 +170,27 @@ export function checkRonWin(game, seat, discarderSeat, tile) {
   return evaluateWin(game, seat, { concealedTiles, isTsumo: false, winTile: tile, discarderSeat });
 }
 
-function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSeat }) {
+function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSeat, isFirstUninterruptedDraw = false }) {
   const player = game.players[seat];
   const meldCount = player.melds.length;
   if (!isComplete(concealedTiles, meldCount)) return { canWin: false, reason: 'not_complete' };
+
+  // North can only ever be a hand tile for kokushi/tsuuiisou/shousuushii/
+  // daisuushii (spec section 6/18) — reject any other "complete" hand
+  // that happens to include it (e.g. a north triplet counted like an
+  // ordinary honor triplet by the generic hand decomposition).
+  const yakumanCtx = {
+    concealedTiles,
+    calledMelds: player.melds,
+    winTile,
+    isTsumo,
+    isFirstUninterruptedDraw,
+    isDealer: player.isDealer,
+  };
+  const yakumanResult = detectYakuman(yakumanCtx);
+  if (usesNorthTile(concealedTiles, player.melds) && !yakumanResult.northEligible) {
+    return { canWin: false, reason: 'invalid_north_usage' };
+  }
 
   const menzen = isMenzenNow(player);
   const seatWind = seatWindOf(seat, game.round.dealerSeat);
@@ -186,6 +211,19 @@ function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSe
     ruleConfig: game.ruleConfig,
   };
 
+  if (yakumanResult.isYakuman) {
+    return {
+      canWin: true,
+      isYakuman: true,
+      yakumanResult,
+      ctx,
+      isDealer: player.isDealer,
+      seat,
+      isTsumo,
+      discarderSeat,
+    };
+  }
+
   const yakuResult = evaluateYaku(ctx, game.ruleConfig);
   if (player.riichi.furo && !player.riichi.open) {
     const otherHan = yakuResult.han;
@@ -205,11 +243,8 @@ function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSe
 }
 
 export function resolveWin(game, winCheck) {
-  const { seat, ctx, yakuResult, isDealer, isTsumo, discarderSeat } = winCheck;
+  const { seat, ctx, isDealer, isTsumo, discarderSeat } = winCheck;
   const player = game.players[seat];
-  const decomposition = yakuResult.decomposition ?? { melds: [], pair: null };
-  const isChiitoitsuWin = yakuResult.yakuList.some((y) => y.name === '七対子');
-
   const activeSeasons = getActiveSeasons(player.flowerTiles, game.round.doraIndicators, game.round.uraDoraIndicators);
 
   const doraResult = computeDoraHan({
@@ -219,15 +254,37 @@ export function resolveWin(game, winCheck) {
     riichiActive: player.riichi.active,
     kitaCount: player.kitaTiles.length,
   });
-  const autumnBonusHan = computeAutumnBonusHan(ctx.concealedTiles, activeSeasons);
 
-  const fu = computeFu(decomposition, ctx.calledMelds, {
-    ...ctx,
-    hasPinfu: yakuResult.yakuList.some((y) => y.name === '平和'),
-    isChiitoitsu: isChiitoitsuWin,
-  });
-  const han = yakuResult.han + doraResult.total + autumnBonusHan;
-  const base = applySummerRankUp(computeBasePoints(fu, han), activeSeasons);
+  let fu = null;
+  let han;
+  let base;
+  let yakuList;
+  let isPureYakuman = false;
+
+  if (winCheck.isYakuman) {
+    // This spec's yakuman list (section 22-27) is presented flat with
+    // no stacking/double-yakuman rules, so any match uses the same
+    // fixed base — see ScoreEngine's mangan-and-up table (han 13 -> 8000).
+    isPureYakuman = true;
+    han = 13;
+    base = applySummerRankUp(8000, activeSeasons, { isYakuman: true });
+    yakuList = winCheck.yakumanResult.names.map((name) => ({ name, han: 13 }));
+  } else {
+    const { yakuResult } = winCheck;
+    const decomposition = yakuResult.decomposition ?? { melds: [], pair: null };
+    const isChiitoitsuWin = yakuResult.yakuList.some((y) => y.name === '七対子');
+    const autumnBonusHan = computeAutumnBonusHan(ctx.concealedTiles, activeSeasons);
+
+    fu = computeFu(decomposition, ctx.calledMelds, {
+      ...ctx,
+      hasPinfu: yakuResult.yakuList.some((y) => y.name === '平和'),
+      isChiitoitsu: isChiitoitsuWin,
+    });
+    han = yakuResult.han + doraResult.total + autumnBonusHan;
+    base = applySummerRankUp(computeBasePoints(fu, han), activeSeasons);
+    yakuList = yakuResult.yakuList;
+  }
+  const isCountedYakuman = !isPureYakuman && han >= 13;
 
   const { deltas } = computeWinPayments({
     fu,
@@ -261,6 +318,9 @@ export function resolveWin(game, winCheck) {
     kitaCount: player.kitaTiles.length,
     isWin: true,
     shubaTier: game.shubariichi?.tier?.[seat] ?? null,
+    isPureYakuman,
+    isCountedYakuman,
+    summerActive: activeSeasons.has(2),
   }, game.ruleConfig);
   game.chip = applyChipDelta(game.chip, [seat === 0 ? chipResult.total : 0, seat === 1 ? chipResult.total : 0, seat === 2 ? chipResult.total : 0]);
 
@@ -270,9 +330,10 @@ export function resolveWin(game, winCheck) {
     base,
     scoreDeltas: withHonba,
     chipResult,
-    yakuList: yakuResult.yakuList,
+    yakuList,
     doraResult,
     activeSeasons,
+    isYakuman: isPureYakuman,
   };
 }
 

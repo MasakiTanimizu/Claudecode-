@@ -198,4 +198,57 @@ describe('TurnEngine', () => {
     expect(result.doraResult.nukiDora).toBe(2);
     expect(result.han).toBe(win.yakuResult.han + 2);
   });
+
+  it('detects a kokushi tsumo end-to-end and scores it as a pure yakuman (base 8000)', () => {
+    const game = makeGame();
+    game.players[1].hand = [
+      t('m', 1), t('m', 1), t('m', 9), t('p', 1), t('p', 9),
+      t('s', 1), t('s', 9), t('z', 1), t('z', 2), t('z', 3),
+      t('z', 4), t('z', 5), t('z', 6), t('z', 7),
+    ];
+
+    const win = checkTsumoWin(game, 1);
+    expect(win.canWin).toBe(true);
+    expect(win.isYakuman).toBe(true);
+
+    const result = resolveWin(game, win);
+    expect(result.isYakuman).toBe(true);
+    expect(result.han).toBe(13);
+    expect(result.base).toBe(8000);
+    expect(result.yakuList.map((y) => y.name)).toContain('国士無双');
+    expect(result.chipResult.breakdown.find((b) => b.name === 'yakuman').chips).toBe(rules.RULE_CHIP_VALUES.pureYakuman);
+  });
+
+  it('rejects a "complete" hand that uses north outside kokushi/tsuuiisou/shousuushii/daisuushii', () => {
+    const game = makeGame();
+    // Structurally decomposes as 4 sets + pair, but one triplet is north
+    // (z4), which is never usable as an ordinary hand tile.
+    game.players[1].hand = [
+      t('z', 4), t('z', 4), t('z', 4),
+      t('p', 2), t('p', 3), t('p', 4),
+      t('s', 6), t('s', 7), t('s', 8),
+      t('m', 1), t('m', 1), t('m', 1),
+      t('p', 7), t('p', 7),
+    ];
+
+    const win = checkTsumoWin(game, 1);
+    expect(win.canWin).toBe(false);
+    expect(win.reason).toBe('invalid_north_usage');
+  });
+
+  it('allows north as the shousuushii pair (one of its 4 legitimate uses)', () => {
+    const game = makeGame();
+    game.players[1].hand = [
+      t('z', 1), t('z', 1), t('z', 1),
+      t('z', 2), t('z', 2), t('z', 2),
+      t('z', 3), t('z', 3), t('z', 3),
+      t('p', 1), t('p', 2), t('p', 3),
+      t('z', 4), t('z', 4),
+    ];
+
+    const win = checkTsumoWin(game, 1);
+    expect(win.canWin).toBe(true);
+    expect(win.isYakuman).toBe(true);
+    expect(win.yakumanResult.names).toContain('小四喜');
+  });
 });

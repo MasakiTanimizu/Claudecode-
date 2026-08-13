@@ -1,14 +1,16 @@
-// YakuEngine: Phase 1 yaku detection (spec sections 14-19, subset).
+// YakuEngine: yaku detection (spec sections 14-21, 27).
 //
-// Implements the basic 1-han list plus chiitoitsu (2-han, listed under
-// section 19 but simple enough to include alongside the Phase 1 basics).
-// Multi-han "special" yaku (ittsuu, toitoi, sanankou, honitsu/chinitsu,
-// chanta, yakuman, ...) and the seasonal/Alice/Shuba systems are Phase
-// 2-5 per the roadmap (spec section 62) and are intentionally not
-// implemented here; ScoreEngine treats an empty yaku list as "no win".
+// Covers the 1-han basics, chiitoitsu, and the section 19-21/27 regular
+// yaku list (ittsuu, chanta/junchan with the doubling rule, toitoi,
+// sanankou, sanshoku doukou, sankantsu, shousangen, sanrenkou, sanfon,
+// niipeikou, honitsu, chinitsu). Yakuman (section 22-27's yakuman-tier
+// items) is handled by Yakuman.js and checked before this module by the
+// turn engine — see TurnEngine.evaluateWin. Alice/Shuba/kinsei are
+// still later-phase systems and not implemented here; ScoreEngine
+// treats an empty yaku list as "no win".
 
 import { decomposeStandardHand, isChiitoitsu } from '../hand/HandParser.js';
-import { isSimple } from '../tiles/Tiles.js';
+import { isSimple, isTerminalOrHonor, isHonor } from '../tiles/Tiles.js';
 
 const YAKUHAI_HONOR_RANKS = new Set([5, 6, 7]); // 白發中 — north (4) never counts (spec section 18).
 
@@ -69,6 +71,112 @@ function iipeikouCount(decomposition) {
   return pairs;
 }
 
+function isTripletLike(m) {
+  return m.type === 'triplet' || m.type === 'kan';
+}
+
+function hasSet(sets, suit, rank) {
+  return sets.some((m) => isTripletLike(m) && m.suit === suit && m.rank === rank);
+}
+
+// spec section 19: 一気通貫 — 123/456/789 of the same suit. Pin/sou only;
+// man can never form a sequence (only rank 1/9 exist).
+function ittsuuHan(allSets, isMenzen) {
+  for (const suit of ['p', 's']) {
+    const has = (rank) => allSets.some((m) => m.type === 'sequence' && m.suit === suit && m.rank === rank);
+    if (has(1) && has(4) && has(7)) return isMenzen ? 2 : 1;
+  }
+  return 0;
+}
+
+// spec sections 20-21: 混全帯么九(chanta)/純全帯么九(junchan), with the
+// chanta-family 2x doubling rule applied afterward by the caller.
+// Every set (including the pair) must touch a terminal-or-honor tile;
+// junchan additionally forbids any honor tile.
+function chantaTier(decomposition, calledMelds) {
+  const allSets = [...decomposition.melds, ...calledMelds];
+  const setTouchesTerminal = (m) => {
+    if (m.type === 'sequence') return m.rank === 1 || m.rank === 7;
+    return isTerminalOrHonor({ suit: m.suit, rank: m.rank });
+  };
+  if (!allSets.every(setTouchesTerminal)) return null;
+  if (!isTerminalOrHonor(decomposition.pair)) return null;
+
+  const anyHonor = allSets.some((m) => m.suit === 'z') || isHonor(decomposition.pair);
+  return anyHonor ? 'chanta' : 'junchan';
+}
+
+function toitoiHan(decomposition) {
+  return decomposition.melds.every(isTripletLike) ? 2 : 0;
+}
+
+// Ron-completing a triplet counts it as open (minko), same convention
+// as ScoreEngine's fu calculation — it does not count toward sanankou.
+function isAnkou(meld, ctx) {
+  if (meld.type !== 'triplet' && meld.type !== 'kan') return false;
+  const containsWinTile = ctx.winTile && ctx.winTile.suit === meld.suit && ctx.winTile.rank === meld.rank;
+  if (containsWinTile && !ctx.isTsumo) return false;
+  return true;
+}
+
+function sanankouHan(decomposition, calledMelds, ctx) {
+  const concealedAnkou = decomposition.melds.filter((m) => isAnkou(m, ctx)).length;
+  const calledAnkan = calledMelds.filter((m) => m.type === 'kan' && m.concealed).length;
+  return (concealedAnkou + calledAnkan) >= 3 ? 2 : 0;
+}
+
+// spec section 19: 三色同刻 — since man only has rank 1/9, this can only
+// ever be 111 or 999 across man/pin/sou.
+function sanshokuDoukouHan(allSets) {
+  for (const rank of [1, 9]) {
+    if (hasSet(allSets, 'm', rank) && hasSet(allSets, 'p', rank) && hasSet(allSets, 's', rank)) return 2;
+  }
+  return 0;
+}
+
+function sankantsuHan(calledMelds) {
+  return calledMelds.filter((m) => m.type === 'kan').length >= 3 ? 2 : 0;
+}
+
+// spec section 19: 小三元2翻＋役牌分を加算 — the flat 2han is additive on
+// top of whatever 役牌 han the two dragon triplets already contribute.
+function shousangenHan(allSets, decomposition) {
+  const dragonRanks = [5, 6, 7];
+  const triplets = dragonRanks.filter((r) => hasSet(allSets, 'z', r));
+  const pairIsDragon = decomposition.pair.suit === 'z' && dragonRanks.includes(decomposition.pair.rank);
+  return triplets.length === 2 && pairIsDragon ? 2 : 0;
+}
+
+// spec section 27: 三連刻 — 3 triplets of consecutive rank, same suit.
+function sanrenkouHan(allSets) {
+  for (const suit of ['p', 's']) {
+    for (let rank = 1; rank <= 7; rank++) {
+      if (hasSet(allSets, suit, rank) && hasSet(allSets, suit, rank + 1) && hasSet(allSets, suit, rank + 2)) return 2;
+    }
+  }
+  return 0;
+}
+
+// spec section 27: 三風 — north can never be a hand tile outside
+// kokushi/tsuuiisou/shousuushii/daisuushii (section 18), so the only
+// three wind tiles that can ever form triplets here are East/South/West.
+function sanfonHan(allSets) {
+  return [1, 2, 3].every((r) => hasSet(allSets, 'z', r)) ? 2 : 0;
+}
+
+function suitOf(tile) {
+  return tile.suit;
+}
+
+// spec section 20: 混一色(honitsu)/清一色(chinitsu) — one numbered suit,
+// optionally mixed with honors for honitsu.
+function honitsuOrChinitsuTier(allTiles) {
+  const suits = new Set(allTiles.filter((t) => !isHonor(t)).map(suitOf));
+  if (suits.size !== 1) return null;
+  const hasHonorTile = allTiles.some(isHonor);
+  return hasHonorTile ? 'honitsu' : 'chinitsu';
+}
+
 // ctx: {
 //   concealedTiles, calledMelds, winTile, isTsumo, isMenzen,
 //   roundWind, seatWind, riichi: { active, ippatsu, open, furo },
@@ -103,11 +211,16 @@ function evaluateForChiitoitsu(ctx) {
 
 function evaluateForStandard(decomposition, ctx) {
   const allTiles = allHandTiles(decomposition, ctx.calledMelds);
+  const allSets = [...decomposition.melds, ...ctx.calledMelds];
   const yakuList = [];
 
   if (ctx.isMenzen) {
     const iipeikou = iipeikouCount(decomposition);
-    if (iipeikou >= 1) yakuList.push({ name: '一盃口', han: 1 });
+    if (iipeikou >= 2) {
+      yakuList.push({ name: '二盃口', han: 3 }); // replaces 一盃口, not additive
+    } else if (iipeikou === 1) {
+      yakuList.push({ name: '一盃口', han: 1 });
+    }
   }
 
   if (isTanyaoHand(allTiles)) yakuList.push({ name: 'タンヤオ', han: 1 });
@@ -116,10 +229,47 @@ function evaluateForStandard(decomposition, ctx) {
     yakuList.push({ name: '平和', han: 1 });
   }
 
-  const allSets = [...decomposition.melds, ...ctx.calledMelds];
   let yakuhaiHanTotal = 0;
   for (const m of allSets) yakuhaiHanTotal += yakuhaiHan(m, ctx);
   if (yakuhaiHanTotal > 0) yakuList.push({ name: '役牌', han: yakuhaiHanTotal });
+
+  const ittsuu = ittsuuHan(allSets, ctx.isMenzen);
+  if (ittsuu > 0) yakuList.push({ name: '一気通貫', han: ittsuu });
+
+  const chantaTierResult = chantaTier(decomposition, ctx.calledMelds);
+  if (chantaTierResult) {
+    const base = chantaTierResult === 'junchan' ? (ctx.isMenzen ? 3 : 2) : (ctx.isMenzen ? 2 : 1);
+    const doubled = base * 2; // spec section 21: チャンタ系2倍
+    yakuList.push({ name: chantaTierResult === 'junchan' ? '純全帯么九' : '混全帯么九', han: doubled });
+  }
+
+  const toitoi = toitoiHan(decomposition);
+  if (toitoi > 0) yakuList.push({ name: '対々和', han: toitoi });
+
+  const sanankou = sanankouHan(decomposition, ctx.calledMelds, ctx);
+  if (sanankou > 0) yakuList.push({ name: '三暗刻', han: sanankou });
+
+  const sanshokuDoukou = sanshokuDoukouHan(allSets);
+  if (sanshokuDoukou > 0) yakuList.push({ name: '三色同刻', han: sanshokuDoukou });
+
+  const sankantsu = sankantsuHan(ctx.calledMelds);
+  if (sankantsu > 0) yakuList.push({ name: '三槓子', han: sankantsu });
+
+  const shousangen = shousangenHan(allSets, decomposition);
+  if (shousangen > 0) yakuList.push({ name: '小三元', han: shousangen });
+
+  const sanrenkou = sanrenkouHan(allSets);
+  if (sanrenkou > 0) yakuList.push({ name: '三連刻', han: sanrenkou });
+
+  const sanfon = sanfonHan(allSets);
+  if (sanfon > 0) yakuList.push({ name: '三風', han: sanfon });
+
+  const suitTier = honitsuOrChinitsuTier(allTiles);
+  if (suitTier === 'honitsu') {
+    yakuList.push({ name: '混一色', han: ctx.isMenzen ? 3 : 2 });
+  } else if (suitTier === 'chinitsu') {
+    yakuList.push({ name: '清一色', han: ctx.isMenzen ? 6 : 5 });
+  }
 
   pushCommonYaku(yakuList, ctx, {});
 

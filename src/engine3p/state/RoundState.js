@@ -1,7 +1,7 @@
 // RoundState: per-hand state, including honba/shuraba progression
 // (spec sections 9-10).
 
-export function createRoundState({ roundWind = 1, roundNumber = 1, dealerSeat = 0 } = {}) {
+export function createRoundState({ roundWind = 1, roundNumber = 1, dealerSeat = 0, playerCount = 3 } = {}) {
   return {
     roundWind, // 1 = East (東風戦なので東場のみ想定)
     roundNumber, // 東1局 = 1, 東2局 = 2, ...
@@ -12,6 +12,12 @@ export function createRoundState({ roundWind = 1, roundNumber = 1, dealerSeat = 
     doraIndicators: [],
     uraDoraIndicators: [],
     turn: 0,
+    // Tenhou/chiihou tracking (spec section 23): a call breaks the
+    // "uninterrupted" window for every seat that hasn't drawn yet.
+    totalDraws: 0,
+    anyCallMade: false,
+    firstDrawDoneBySeat: Array.from({ length: playerCount }, () => false),
+    lastDrawWasFirstUninterrupted: false,
   };
 }
 
@@ -37,5 +43,9 @@ export function nextRound(round, { dealerContinues, dealerSeat }) {
     turn: 0,
     doraIndicators: [],
     uraDoraIndicators: [],
+    totalDraws: 0,
+    anyCallMade: false,
+    firstDrawDoneBySeat: round.firstDrawDoneBySeat.map(() => false),
+    lastDrawWasFirstUninterrupted: false,
   };
 }

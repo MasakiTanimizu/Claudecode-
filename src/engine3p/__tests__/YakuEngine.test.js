@@ -170,4 +170,217 @@ describe('YakuEngine', () => {
     expect(requiresOpenForFuroRiichi(0)).toBe(true);
     expect(requiresOpenForFuroRiichi(1)).toBe(false);
   });
+
+  it('detects ittsuu (123/456/789 same suit), 2 han menzen / 1 han open', () => {
+    const menzenCtx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 2), t('p', 3),
+        t('p', 4), t('p', 5), t('p', 6),
+        t('p', 7), t('p', 8), t('p', 9),
+        t('s', 3), t('s', 4), t('s', 5),
+        t('z', 7), t('z', 7),
+      ],
+    });
+    const menzenResult = evaluateYaku(menzenCtx, rules);
+    expect(menzenResult.yakuList.find((y) => y.name === '一気通貫').han).toBe(2);
+
+    const openCtx = baseCtx({
+      concealedTiles: [
+        t('p', 4), t('p', 5), t('p', 6),
+        t('p', 7), t('p', 8), t('p', 9),
+        t('s', 3), t('s', 4), t('s', 5),
+        t('z', 7), t('z', 7),
+      ],
+      calledMelds: [{ type: 'sequence', suit: 'p', rank: 1, concealed: false }],
+      isMenzen: false,
+    });
+    const openResult = evaluateYaku(openCtx, rules);
+    expect(openResult.yakuList.find((y) => y.name === '一気通貫').han).toBe(1);
+  });
+
+  it('detects chanta (混全帯么九) and doubles it per the chanta-family rule', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 2), t('p', 3),
+        t('s', 7), t('s', 8), t('s', 9),
+        t('p', 9), t('p', 9), t('p', 9),
+        t('z', 5), t('z', 5), t('z', 5),
+        t('m', 1), t('m', 1),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    // base menzen chanta is 2han, doubled to 4 by the chanta-family rule.
+    expect(result.yakuList.find((y) => y.name === '混全帯么九').han).toBe(4);
+  });
+
+  it('detects junchan (純全帯么九, no honors) and doubles it', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 2), t('p', 3),
+        t('s', 7), t('s', 8), t('s', 9),
+        t('p', 9), t('p', 9), t('p', 9),
+        t('s', 1), t('s', 1), t('s', 1),
+        t('m', 1), t('m', 1),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    // base menzen junchan is 3han, doubled to 6.
+    expect(result.yakuList.find((y) => y.name === '純全帯么九').han).toBe(6);
+  });
+
+  it('detects toitoi (対々和): all 4 sets are triplets', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 1), t('p', 1),
+        t('p', 9), t('p', 9), t('p', 9),
+        t('s', 1), t('s', 1), t('s', 1),
+        t('z', 5), t('z', 5), t('z', 5),
+        t('m', 9), t('m', 9),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '対々和').han).toBe(2);
+  });
+
+  it('detects sanankou (三暗刻): 3 concealed triplets on a tsumo win', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('m', 1), t('m', 1), t('m', 1),
+        t('s', 1), t('s', 1), t('s', 1),
+        t('z', 6), t('z', 6), t('z', 6),
+        t('p', 1), t('p', 2), t('p', 3),
+        t('p', 8), t('p', 8),
+      ],
+      isTsumo: true,
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '三暗刻').han).toBe(2);
+  });
+
+  it('detects sanshoku doukou (三色同刻), only possible as 111 or 999', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('m', 1), t('m', 1), t('m', 1),
+        t('p', 1), t('p', 1), t('p', 1),
+        t('s', 1), t('s', 1), t('s', 1),
+        t('s', 4), t('s', 5), t('s', 6),
+        t('z', 5), t('z', 5),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '三色同刻').han).toBe(2);
+  });
+
+  it('detects sankantsu (三槓子): 3 called kans', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 4), t('p', 5), t('p', 6),
+        t('m', 1), t('m', 1),
+      ],
+      calledMelds: [
+        { type: 'kan', suit: 'p', rank: 1, concealed: false },
+        { type: 'kan', suit: 's', rank: 1, concealed: false },
+        { type: 'kan', suit: 'z', rank: 5, concealed: true },
+      ],
+      isMenzen: false,
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '三槓子').han).toBe(2);
+  });
+
+  it('detects shousangen (小三元) additively on top of its yakuhai han', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('z', 5), t('z', 5), t('z', 5),
+        t('z', 6), t('z', 6), t('z', 6),
+        t('z', 7), t('z', 7),
+        t('p', 1), t('p', 2), t('p', 3),
+        t('s', 4), t('s', 5), t('s', 6),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '小三元').han).toBe(2);
+    expect(result.yakuList.find((y) => y.name === '役牌').han).toBe(2); // haku + hatsu triplets
+  });
+
+  it('detects sanrenkou (三連刻): 3 consecutive-rank triplets, same suit', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 3), t('p', 3), t('p', 3),
+        t('p', 4), t('p', 4), t('p', 4),
+        t('p', 5), t('p', 5), t('p', 5),
+        t('s', 1), t('s', 2), t('s', 3),
+        t('z', 5), t('z', 5),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '三連刻').han).toBe(2);
+  });
+
+  it('detects sanfon (三風): only East/South/West can ever form it, never north', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('z', 1), t('z', 1), t('z', 1),
+        t('z', 2), t('z', 2), t('z', 2),
+        t('z', 3), t('z', 3), t('z', 3),
+        t('p', 1), t('p', 2), t('p', 3),
+        t('s', 5), t('s', 5),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '三風').han).toBe(2);
+  });
+
+  it('detects honitsu (混一色, one suit + honors) with the menzen/open split', () => {
+    const menzenCtx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 2), t('p', 3),
+        t('p', 4), t('p', 5), t('p', 6),
+        t('p', 7), t('p', 8), t('p', 9),
+        t('z', 5), t('z', 5), t('z', 5),
+        t('z', 6), t('z', 6),
+      ],
+    });
+    expect(evaluateYaku(menzenCtx, rules).yakuList.find((y) => y.name === '混一色').han).toBe(3);
+
+    const openCtx = baseCtx({
+      concealedTiles: [
+        t('p', 4), t('p', 5), t('p', 6),
+        t('p', 7), t('p', 8), t('p', 9),
+        t('z', 5), t('z', 5), t('z', 5),
+        t('z', 6), t('z', 6),
+      ],
+      calledMelds: [{ type: 'sequence', suit: 'p', rank: 1, concealed: false }],
+      isMenzen: false,
+    });
+    expect(evaluateYaku(openCtx, rules).yakuList.find((y) => y.name === '混一色').han).toBe(2);
+  });
+
+  it('detects chinitsu (清一色, one suit, no honors) with the menzen/open split', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 2), t('p', 3),
+        t('p', 4), t('p', 5), t('p', 6),
+        t('p', 7), t('p', 8), t('p', 9),
+        t('p', 1), t('p', 1), t('p', 1),
+        t('p', 8), t('p', 8),
+      ],
+    });
+    expect(evaluateYaku(ctx, rules).yakuList.find((y) => y.name === '清一色').han).toBe(6);
+  });
+
+  it('detects niipeikou (二盃口) and does not additionally grant iipeikou', () => {
+    const ctx = baseCtx({
+      concealedTiles: [
+        t('p', 1), t('p', 2), t('p', 3),
+        t('p', 1), t('p', 2), t('p', 3),
+        t('p', 4), t('p', 5), t('p', 6),
+        t('p', 4), t('p', 5), t('p', 6),
+        t('z', 5), t('z', 5),
+      ],
+    });
+    const result = evaluateYaku(ctx, rules);
+    expect(result.yakuList.find((y) => y.name === '二盃口').han).toBe(3);
+    expect(result.yakuList.find((y) => y.name === '一盃口')).toBeUndefined();
+  });
 });
