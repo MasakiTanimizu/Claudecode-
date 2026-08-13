@@ -26,12 +26,21 @@ export const DEFAULT_RULE_CONFIG = {
 
   RULE_ALICE_CHIP: 1,
 
+  // Shuba mechanics, per the user's clarification (supersedes the
+  // original doc's "35000 points" framing, which conflicted with
+  // section 14's "riichi stick is 1000 points"):
+  //   通常リーチ: 供託1000
+  //   シュバ/シュバゾーマ: 供託1000 + シバ棒(1回/局のトークン消費)
+  //   シュバンテ: 供託に持ち点全て(要 > 60000) + シバ棒
+  // The shuba stick is a once-per-hand permission token, not a real
+  // point deduction — RULE_SHUBA_STICK_VALUE is display-only (it's
+  // shown at the table as a 100-point stick) and never enters the
+  // kyoutaku math directly.
   RULE_SHUBA_MULTIPLIER: 2,
   RULE_SHUBA_ZOMA_MULTIPLIER: 3,
   RULE_SHUBANTE_MULTIPLIER: 10,
   RULE_SHUBA_STICK_VALUE: 100,
-  RULE_SHUBANTE_MIN_EXTRA: 60000,
-  RULE_SHUBA_ZOMA_EXTRA: 10000,
+  RULE_SHUBANTE_MIN_SCORE: 60000,
 
   RULE_CHIP_VALUES: {
     ippatsu: 1,

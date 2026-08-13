@@ -74,21 +74,45 @@ export function refreshFuriten(game, seat) {
   player.furiten = player.discards.some((d) => winners.has(tileKey(d.suit, d.rank)));
 }
 
-export function declareRiichi(game, seat, { open = false } = {}) {
+const SHUBA_TIERS = new Set(['shuba', 'shubazoma', 'shubante']);
+
+// shubaTier declares シュバ/シュバゾーマ/シュバンテ instead of a plain
+// リーチ (spec section 36, costs per the user's clarification):
+//   通常: 供託1000
+//   シュバ/シュバゾーマ: 供託1000 + シバ棒(1回/局のトークン)
+//   シュバンテ: 供託に持ち点全て（要スコア > 60000）+ シバ棒
+export function declareRiichi(game, seat, { open = false, shubaTier = null } = {}) {
   const player = game.players[seat];
   if (!isMenzenNow(player) && !open) {
     throw new Error('Riichi requires a menzen hand unless declared as furo riichi');
   }
-  const cost = game.ruleConfig.RULE_RIICHI_STICK;
-  if (player.score < cost) throw new Error('Not enough points to declare riichi');
 
-  player.score -= cost;
-  game.round.riichiSticks += 1;
+  // Score lives in ScoreState (game.score), not PlayerState — spec
+  // section 12/41 keep Score/Chip/RankPoint/Bonus as separate state
+  // slices, so this reads/writes the array, never a per-player field.
+  if (shubaTier !== null) {
+    if (!SHUBA_TIERS.has(shubaTier)) throw new Error(`Unknown shuba tier: ${shubaTier}`);
+    if (!game.shubariichi.availableBySeat[seat]) throw new Error('Shuba stick already used this hand');
+    if (shubaTier === 'shubante' && game.score[seat] <= game.ruleConfig.RULE_SHUBANTE_MIN_SCORE) {
+      throw new Error('Shubante requires more than RULE_SHUBANTE_MIN_SCORE points');
+    }
+  }
+
+  const cost = shubaTier === 'shubante' ? game.score[seat] : game.ruleConfig.RULE_RIICHI_STICK;
+  if (game.score[seat] < cost) throw new Error('Not enough points to declare riichi');
+
+  game.score[seat] -= cost;
+  game.round.kyoutakuPoints += cost;
   player.riichi.active = true;
   player.riichi.open = open && !isMenzenNow(player);
   player.riichi.furo = !isMenzenNow(player) && !player.riichi.open;
   player.riichi.ippatsu = true;
   player.riichi.declaredAtTurn = game.round.turn;
+
+  if (shubaTier !== null) {
+    game.shubariichi.availableBySeat[seat] = false;
+    game.shubariichi.tierBySeat[seat] = shubaTier;
+  }
 }
 
 function markReplacementPotchi(game, seat, replacement) {
@@ -128,6 +152,9 @@ export function declareFlowerDraw(game, seat, tileId) {
     const delta = [0, 0, 0];
     delta[seat] = springChips;
     game.chip = applyChipDelta(game.chip, delta);
+    // Paid immediately, but if this player later wins with a shuba tier
+    // active, resolveWin tops this base amount up to the multiplied one.
+    player.hanaChipsThisHand += springChips;
   }
 
   clearAllIppatsu(game);
@@ -411,9 +438,10 @@ export function resolveWin(game, winCheck) {
   });
 
   game.score = applyScoreDelta(game.score, withHonba);
-  // Riichi sticks on the table go to the winner.
-  game.score[seat] += game.round.riichiSticks * game.ruleConfig.RULE_RIICHI_STICK;
-  game.round.riichiSticks = 0;
+  // Everything sitting in the kyoutaku pot (riichi sticks, and any
+  // shubante all-in deposits) goes to the winner.
+  game.score[seat] += game.round.kyoutakuPoints;
+  game.round.kyoutakuPoints = 0;
 
   const chipResult = computeChips({
     handTiles: ctx.concealedTiles,
@@ -423,7 +451,8 @@ export function resolveWin(game, winCheck) {
     ippatsu: player.riichi.ippatsu,
     kitaCount: player.kitaTiles.length,
     isWin: true,
-    shubaTier: game.shubariichi?.tier?.[seat] ?? null,
+    shubaTier: game.shubariichi.tierBySeat[seat] ?? null,
+    hanaChips: player.hanaChipsThisHand,
     isPureYakuman,
     isCountedYakuman,
     summerActive: activeSeasons.has(2),

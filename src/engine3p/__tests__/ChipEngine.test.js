@@ -77,4 +77,40 @@ describe('ChipEngine.computeChips', () => {
     expect(result.multiplier).toBe(1);
     expect(result.total).toBe(1);
   });
+
+  it('nets out already-paid hana chips so a non-shuba win owes nothing extra for them', () => {
+    const result = computeChips({
+      handTiles: [],
+      ippatsu: true,
+      isWin: true,
+      shubaTier: null,
+      hanaChips: 3,
+    }, rules);
+    // ippatsu(1) + hana(3) = 4 subtotal, x1 multiplier, minus the 3 already paid = 1.
+    expect(result.subtotal).toBe(4);
+    expect(result.alreadyPaid).toBe(3);
+    expect(result.total).toBe(1);
+  });
+
+  it('tops hana chips up to the multiplied amount on a shuba win', () => {
+    const result = computeChips({
+      handTiles: [],
+      isWin: true,
+      shubaTier: 'shuba', // x2
+      hanaChips: 3,
+    }, rules);
+    // Owed in total: 3 * 2 = 6. Already paid: 3. Additional owed now: 3.
+    expect(result.total).toBe(3);
+  });
+
+  it('tops hana chips up fully on a shubante win (x10)', () => {
+    const result = computeChips({
+      handTiles: [],
+      isWin: true,
+      shubaTier: 'shubante',
+      hanaChips: 2,
+    }, rules);
+    // Owed in total: 2 * 10 = 20. Already paid: 2. Additional owed now: 18.
+    expect(result.total).toBe(18);
+  });
 });

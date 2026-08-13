@@ -5,11 +5,13 @@ import { createRoundState } from '../state/RoundState.js';
 import { createScoreState, createChipState } from '../state/ScoreState.js';
 import { createFlowerState } from '../state/FlowerState.js';
 import { createWhitePotchiState } from '../state/WhitePotchiState.js';
+import { createShubaState } from '../state/ShubaState.js';
 import {
   drawForTurn,
   discardTile,
   declareKita,
   declareFlowerDraw,
+  declareRiichi,
   declarePon,
   declareDaiminkan,
   declareAnkan,
@@ -30,7 +32,7 @@ function t(suit, rank, variant = null) {
 
 function makeGame({ liveWall = [] } = {}) {
   const ruleConfig = createRuleConfig();
-  const players = [0, 1, 2].map((seat) => createPlayerState(seat, { isDealer: seat === 0, score: 35000 }));
+  const players = [0, 1, 2].map((seat) => createPlayerState(seat, { isDealer: seat === 0 }));
   const round = createRoundState({ dealerSeat: 0 });
   round.doraIndicators = [t('z', 6)];
   round.uraDoraIndicators = [t('z', 6)];
@@ -46,7 +48,7 @@ function makeGame({ liveWall = [] } = {}) {
     },
     flower: createFlowerState(3),
     whitePotchi: createWhitePotchiState(3),
-    shubariichi: { tier: [null, null, null] },
+    shubariichi: createShubaState(3),
   };
 }
 
@@ -371,5 +373,79 @@ describe('TurnEngine', () => {
     const win = checkTsumoWin(game, 0, { isRinshan: true });
     expect(win.canWin).toBe(true);
     expect(win.yakuResult.yakuList.map((y) => y.name)).toContain('嶺上開花');
+  });
+
+  it('declareRiichi deposits 1000 points into the kyoutaku pot for a plain riichi', () => {
+    const game = makeGame();
+    declareRiichi(game, 0);
+    expect(game.score[0]).toBe(35000 - 1000);
+    expect(game.round.kyoutakuPoints).toBe(1000);
+    expect(game.players[0].riichi.active).toBe(true);
+  });
+
+  it('declareRiichi with shubaTier "shuba" costs the same 1000 kyoutaku and consumes the shuba token', () => {
+    const game = makeGame();
+    declareRiichi(game, 0, { shubaTier: 'shuba' });
+    expect(game.score[0]).toBe(35000 - 1000);
+    expect(game.round.kyoutakuPoints).toBe(1000);
+    expect(game.shubariichi.availableBySeat[0]).toBe(false);
+    expect(game.shubariichi.tierBySeat[0]).toBe('shuba');
+  });
+
+  it('throws if the shuba stick was already used this hand', () => {
+    const game = makeGame();
+    game.players[0].hand = [t('p', 1)]; // needs a tile to discard/redeclare in a real flow, unused here
+    declareRiichi(game, 0, { shubaTier: 'shuba' });
+    // A fresh riichi declaration call on the same seat re-checks availability.
+    game.players[0].riichi.active = false; // simulate a hand reset without resetting the shuba token
+    expect(() => declareRiichi(game, 0, { shubaTier: 'shubazoma' })).toThrow();
+  });
+
+  it('rejects shubante when the players score is not above RULE_SHUBANTE_MIN_SCORE', () => {
+    const game = makeGame();
+    game.score[0] = 60000; // exactly at the threshold, not above it
+    expect(() => declareRiichi(game, 0, { shubaTier: 'shubante' })).toThrow();
+  });
+
+  it('shubante deposits the players entire score into the kyoutaku pot', () => {
+    const game = makeGame();
+    game.score[0] = 70000;
+    declareRiichi(game, 0, { shubaTier: 'shubante' });
+    expect(game.score[0]).toBe(0);
+    expect(game.round.kyoutakuPoints).toBe(70000);
+    expect(game.shubariichi.tierBySeat[0]).toBe('shubante');
+  });
+
+  it('pays the winner everything sitting in the kyoutaku pot, including a shubante deposit', () => {
+    const game = makeGame();
+    game.score[0] = 70000;
+    declareRiichi(game, 0, { shubaTier: 'shubante' }); // deposits 70000
+    game.players[1].hand = tanyaoTiles();
+
+    const before = game.score[1];
+    const win = checkTsumoWin(game, 1);
+    resolveWin(game, win);
+    // Winner gets their normal tsumo payout plus the full 70000 kyoutaku pot.
+    expect(game.score[1]).toBeGreaterThanOrEqual(before + 70000);
+    expect(game.round.kyoutakuPoints).toBe(0);
+  });
+
+  it('retroactively tops up already-paid hana chips to the shuba-multiplied amount on a shuba win', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    const spring = t('f', 1);
+    game.players[1].hand = [spring];
+    const { springChips } = declareFlowerDraw(game, 1, spring.id);
+    expect(springChips).toBe(1);
+    expect(game.chip[1]).toBe(1); // paid immediately at 1x
+
+    declareRiichi(game, 1, { shubaTier: 'shuba' }); // x2 multiplier, but riichi needs a menzen hand — set it up next
+    game.players[1].hand = tanyaoTiles();
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    // Hana owed in total: 1 * 2 = 2. Already paid: 1. This win's chip
+    // delta should include exactly 1 more for hana (netted into total).
+    expect(result.chipResult.alreadyPaid).toBe(1);
+    expect(game.chip[1]).toBeGreaterThan(1 + springChips); // more than just the immediate base
   });
 });

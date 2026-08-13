@@ -7,7 +7,11 @@ export function createRoundState({ roundWind = 1, roundNumber = 1, dealerSeat = 
     roundNumber, // 東1局 = 1, 東2局 = 2, ...
     dealerSeat,
     honba: 0,
-    riichiSticks: 0,
+    // Raw point total sitting in the table's deposit pot (供託), not a
+    // stick count — shubante deposits a variable amount (the declaring
+    // player's entire score), so this can't stay a fixed-denomination
+    // counter like a plain riichi stick.
+    kyoutakuPoints: 0,
     shurabaCount: 0,
     doraIndicators: [],
     uraDoraIndicators: [],
@@ -39,7 +43,7 @@ export function nextRound(round, { dealerContinues, dealerSeat }) {
     roundNumber: dealerContinues ? round.roundNumber : round.roundNumber + 1,
     dealerSeat,
     honba: dealerContinues ? round.honba + 1 : round.honba,
-    riichiSticks: 0,
+    kyoutakuPoints: 0,
     turn: 0,
     doraIndicators: [],
     uraDoraIndicators: [],

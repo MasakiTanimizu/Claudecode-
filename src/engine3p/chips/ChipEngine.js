@@ -2,13 +2,18 @@
 // scoring (spec sections 32, 40).
 //
 // Implements the chip sources that only need the winning hand + dora
-// indicators + riichi/kita/yakuman state: red tiles, ippatsu, uradora,
-// kita, and pure/counted yakuman (section 32's 純正役満/数え役満 tiers,
-// doubled when 夏 is active). Alice, Shuba tiers, 金星/大金星/トリプル,
-// 出目金, and 4花4北 are Phase 4-5 per the roadmap (spec section 62);
-// their hooks are present here and return 0 until those engines are
-// implemented, so ScoreEngine/TurnEngine can already call
-// `computeChips` with a stable shape.
+// indicators + riichi/kita/yakuman/hana state: red tiles, ippatsu,
+// uradora, kita, pure/counted yakuman (section 32's 純正役満/数え役満
+// tiers, doubled when 夏 is active), hana chips, and the シュバ/
+// シュバゾーマ/シュバンテ multiplier (applied to everything above,
+// per the user's clarification that it covers 和了り祝儀・華牌祝儀・
+// トビ). Alice, 金星/大金星/トリプル, 出目金, and 4花4北 are still
+// later-phase hooks that return 0 until their own engines exist.
+//
+// Hana chips need special handling: they're paid out immediately at
+// extraction time (spec section 29, before anyone knows if a shuba
+// win is coming), so only the *incremental* multiplier-driven top-up
+// is owed here — see the hana accounting below.
 
 import { countDoraMatches } from '../tiles/Dora.js';
 
@@ -42,7 +47,13 @@ export function computeChips(ctx, ruleConfig) {
   }
   if (yakumanChips > 0) breakdown.push({ name: 'yakuman', count: 1, chips: yakumanChips });
 
-  // Phase 4/5 hooks — not yet implemented.
+  // spec section 29: already paid out at 1x when extracted; included in
+  // the multiplied subtotal below, then netted back out so only the
+  // incremental top-up (if any) is what `total` actually owes now.
+  const hanaChips = ctx.hanaChips ?? 0;
+  if (hanaChips > 0) breakdown.push({ name: 'hana', count: hanaChips, chips: hanaChips });
+
+  // Phase 4 hooks — not yet implemented.
   const aliceChips = computeAliceChips(ctx, ruleConfig);
   if (aliceChips > 0) breakdown.push({ name: 'alice', count: aliceChips / values.alice, chips: aliceChips });
   const kinseiChips = computeKinseiChips(ctx, ruleConfig);
@@ -50,9 +61,9 @@ export function computeChips(ctx, ruleConfig) {
 
   const subtotal = breakdown.reduce((s, b) => s + b.chips, 0);
   const multiplier = computeShubaMultiplier(ctx, ruleConfig);
-  const total = subtotal * multiplier;
+  const total = subtotal * multiplier - hanaChips;
 
-  return { breakdown, subtotal, multiplier, total };
+  return { breakdown, subtotal, multiplier, alreadyPaid: hanaChips, total };
 }
 
 // Phase 4 — Alice engine not yet implemented.
