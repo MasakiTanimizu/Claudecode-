@@ -10,6 +10,10 @@ import {
   discardTile,
   declareKita,
   declareFlowerDraw,
+  declarePon,
+  declareDaiminkan,
+  declareAnkan,
+  declareShouminkan,
   checkTsumoWin,
   checkRonWin,
   resolveWin,
@@ -250,5 +254,122 @@ describe('TurnEngine', () => {
     expect(win.canWin).toBe(true);
     expect(win.isYakuman).toBe(true);
     expect(win.yakumanResult.names).toContain('小四喜');
+  });
+
+  it('declarePon claims the last discard, forms an open meld, and passes the turn to the caller', () => {
+    const game = makeGame();
+    const p1a = t('p', 1);
+    const p1b = t('p', 1);
+    const discarded = t('p', 1);
+    game.players[1].hand = [p1a, p1b];
+    game.players[0].discards = [discarded];
+
+    const meld = declarePon(game, 1, 0, [p1a.id, p1b.id]);
+
+    expect(meld).toEqual({ type: 'pon', suit: 'p', rank: 1, concealed: false, calledFrom: 0, tiles: [p1a, p1b, discarded] });
+    expect(game.players[1].hand.length).toBe(0);
+    expect(game.players[0].discards.length).toBe(0);
+    expect(game.round.turn).toBe(1);
+    expect(game.round.anyCallMade).toBe(true);
+  });
+
+  it('declarePon throws when the discarder\'s last discard does not match', () => {
+    const game = makeGame();
+    const p1a = t('p', 1);
+    const p1b = t('p', 1);
+    game.players[1].hand = [p1a, p1b];
+    game.players[0].discards = [t('p', 2)];
+    expect(() => declarePon(game, 1, 0, [p1a.id, p1b.id])).toThrow();
+  });
+
+  it('declareDaiminkan forms an open kan off a discard and draws a replacement', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    const tiles = [t('p', 5), t('p', 5), t('p', 5)];
+    game.players[1].hand = [...tiles];
+    game.players[0].discards = [t('p', 5)];
+
+    const { meld, replacement } = declareDaiminkan(game, 1, 0, tiles.map((x) => x.id));
+    expect(meld.type).toBe('kan');
+    expect(meld.concealed).toBe(false);
+    expect(meld.tiles.length).toBe(4);
+    expect(replacement).toBeTruthy();
+    expect(game.players[1].hand).toContain(replacement);
+    expect(game.round.turn).toBe(1);
+    expect(game.round.anyCallMade).toBe(true);
+  });
+
+  it('declareAnkan forms a concealed kan from 4 hand tiles without changing the turn', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    const tiles = [t('m', 1), t('m', 1), t('m', 1), t('m', 1)];
+    game.players[0].hand = [...tiles];
+    game.round.turn = 0;
+
+    const { meld, replacement } = declareAnkan(game, 0, tiles.map((x) => x.id));
+    expect(meld.type).toBe('kan');
+    expect(meld.concealed).toBe(true);
+    expect(meld.calledFrom).toBeUndefined();
+    expect(replacement).toBeTruthy();
+    expect(game.round.turn).toBe(0); // ankan is a self-declared action, no interruption
+  });
+
+  it('declareShouminkan upgrades an existing pon into a kan using a newly drawn tile', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    const [t1, t2, t3] = [t('z', 6), t('z', 6), t('z', 6)];
+    game.players[0].melds = [{ type: 'pon', suit: 'z', rank: 6, concealed: false, calledFrom: 1, tiles: [t1, t2, t3] }];
+    const fourth = t('z', 6);
+    game.players[0].hand = [fourth];
+
+    const { meld, addedTile, replacement } = declareShouminkan(game, 0, fourth.id);
+    expect(meld.type).toBe('kan');
+    expect(meld.tiles.length).toBe(4);
+    expect(addedTile).toBe(fourth);
+    expect(replacement).toBeTruthy();
+  });
+
+  it('allows chankan: robbing a shouminkans added tile completes another players hand for 槍槓', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    const [t1, t2, t3] = [t('z', 6), t('z', 6), t('z', 6)];
+    game.players[0].melds = [{ type: 'pon', suit: 'z', rank: 6, concealed: false, calledFrom: 1, tiles: [t1, t2, t3] }];
+    const fourth = t('z', 6);
+    game.players[0].hand = [fourth];
+
+    // seat 2 is tenpai waiting specifically on z6 (tanki wait).
+    game.players[2].hand = [
+      t('p', 1), t('p', 2), t('p', 3),
+      t('s', 4), t('s', 5), t('s', 6),
+      t('m', 1), t('m', 1), t('m', 1),
+      t('p', 7), t('p', 8), t('p', 9),
+      t('z', 6),
+    ];
+
+    const { addedTile } = declareShouminkan(game, 0, fourth.id);
+    const win = checkRonWin(game, 2, 0, addedTile, { isChankan: true });
+    expect(win.canWin).toBe(true);
+    expect(win.yakuResult.yakuList.map((y) => y.name)).toContain('槍槓');
+  });
+
+  it('allows rinshan kaihou: winning off a kans replacement draw', () => {
+    // drawReplacement pulls from the dead wall's replacement pool, not
+    // straight off the live wall — arrange the pool so the replacement
+    // is exactly the tile that completes the hand (a tanki wait on s1,
+    // after the 4-tile ankan and 2 other complete sets + a triplet).
+    const winningTile = t('s', 1);
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    game.wall.deadWall.replacementPool = [winningTile];
+    const tiles = [t('m', 1), t('m', 1), t('m', 1), t('m', 1)];
+    game.players[0].hand = [
+      ...tiles,
+      t('p', 2), t('p', 3), t('p', 4),
+      t('s', 6), t('s', 7), t('s', 8),
+      t('p', 8), t('p', 8), t('p', 8),
+      t('s', 1),
+    ];
+
+    const { replacement } = declareAnkan(game, 0, tiles.map((x) => x.id));
+    expect(replacement).toBe(winningTile);
+
+    const win = checkTsumoWin(game, 0, { isRinshan: true });
+    expect(win.canWin).toBe(true);
+    expect(win.yakuResult.yakuList.map((y) => y.name)).toContain('嶺上開花');
   });
 });

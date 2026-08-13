@@ -153,24 +153,130 @@ export function canDeclareChi(ruleConfig, calledTile) {
   return true;
 }
 
-export function checkTsumoWin(game, seat) {
+function popLastDiscard(game, discarderSeat, expectedSuit, expectedRank) {
+  const discarder = game.players[discarderSeat];
+  const last = discarder.discards[discarder.discards.length - 1];
+  if (!last || last.suit !== expectedSuit || last.rank !== expectedRank) {
+    throw new Error('No matching discard available to call');
+  }
+  return discarder.discards.pop();
+}
+
+function removeHandTiles(player, tileIds) {
+  const removed = [];
+  for (const id of tileIds) {
+    const idx = player.hand.findIndex((t) => t.id === id);
+    if (idx === -1) throw new Error(`Tile ${id} not in hand`);
+    removed.push(player.hand.splice(idx, 1)[0]);
+  }
+  return removed;
+}
+
+function requireSameTile(tiles, label) {
+  const [first] = tiles;
+  if (!tiles.every((t) => t.suit === first.suit && t.rank === first.rank)) {
+    throw new Error(`${label} tiles must all match`);
+  }
+  return first;
+}
+
+export function declarePon(game, callerSeat, discarderSeat, handTileIds) {
+  if (handTileIds.length !== 2) throw new Error('Pon requires exactly 2 hand tiles');
+  const caller = game.players[callerSeat];
+  const removed = removeHandTiles(caller, handTileIds);
+  const { suit, rank } = requireSameTile(removed, 'Pon');
+  const called = popLastDiscard(game, discarderSeat, suit, rank);
+
+  caller.melds.push({ type: 'pon', suit, rank, concealed: false, calledFrom: discarderSeat, tiles: [...removed, called] });
+  clearAllIppatsu(game);
+  game.round.anyCallMade = true;
+  game.round.turn = callerSeat;
+  refreshFuriten(game, callerSeat);
+  return caller.melds[caller.melds.length - 1];
+}
+
+// Daiminkan (大明槓): an open kan called directly off a discard.
+export function declareDaiminkan(game, callerSeat, discarderSeat, handTileIds) {
+  if (handTileIds.length !== 3) throw new Error('Daiminkan requires exactly 3 hand tiles');
+  const caller = game.players[callerSeat];
+  const removed = removeHandTiles(caller, handTileIds);
+  const { suit, rank } = requireSameTile(removed, 'Kan');
+  const called = popLastDiscard(game, discarderSeat, suit, rank);
+
+  caller.melds.push({ type: 'kan', suit, rank, concealed: false, calledFrom: discarderSeat, tiles: [...removed, called] });
+  clearAllIppatsu(game);
+  game.round.anyCallMade = true;
+  game.round.turn = callerSeat;
+  const replacement = drawReplacement(game.wall);
+  if (replacement) caller.hand.push(replacement);
+  markReplacementPotchi(game, callerSeat, replacement);
+  refreshFuriten(game, callerSeat);
+  return { meld: caller.melds[caller.melds.length - 1], replacement };
+}
+
+// Ankan (暗槓): a concealed kan declared from 4 tiles already in hand,
+// on the player's own turn. Stays concealed for menzen purposes.
+export function declareAnkan(game, seat, handTileIds) {
+  if (handTileIds.length !== 4) throw new Error('Ankan requires exactly 4 hand tiles');
+  const player = game.players[seat];
+  const removed = removeHandTiles(player, handTileIds);
+  const { suit, rank } = requireSameTile(removed, 'Kan');
+
+  player.melds.push({ type: 'kan', suit, rank, concealed: true, tiles: removed });
+  clearAllIppatsu(game);
+  game.round.anyCallMade = true;
+  const replacement = drawReplacement(game.wall);
+  if (replacement) player.hand.push(replacement);
+  markReplacementPotchi(game, seat, replacement);
+  refreshFuriten(game, seat);
+  return { meld: player.melds[player.melds.length - 1], replacement };
+}
+
+// Shouminkan (加槓): upgrades an already-called pon into a kan using the
+// 4th matching tile drawn later. The added tile can be robbed by ron
+// (槍槓, spec section 18) — the driver should offer every other seat a
+// checkRonWin(..., { isChankan: true }) chance against `addedTile`
+// before treating this kan (and its replacement draw) as final.
+export function declareShouminkan(game, seat, tileId) {
+  const player = game.players[seat];
+  const idx = player.hand.findIndex((t) => t.id === tileId);
+  if (idx === -1) throw new Error(`Tile ${tileId} not in seat ${seat}'s hand`);
+  const [tile] = player.hand.splice(idx, 1);
+  const ponMeld = player.melds.find((m) => m.type === 'pon' && m.suit === tile.suit && m.rank === tile.rank);
+  if (!ponMeld) throw new Error('No matching pon to upgrade into a kan');
+
+  ponMeld.type = 'kan';
+  ponMeld.tiles.push(tile);
+  clearAllIppatsu(game);
+  game.round.anyCallMade = true;
+  const replacement = drawReplacement(game.wall);
+  if (replacement) player.hand.push(replacement);
+  markReplacementPotchi(game, seat, replacement);
+  refreshFuriten(game, seat);
+  return { meld: ponMeld, addedTile: tile, replacement };
+}
+
+export function checkTsumoWin(game, seat, { isRinshan = false } = {}) {
   const player = game.players[seat];
   return evaluateWin(game, seat, {
     concealedTiles: player.hand,
     isTsumo: true,
     winTile: player.hand[player.hand.length - 1],
     isFirstUninterruptedDraw: game.round.lastDrawWasFirstUninterrupted,
+    isRinshan,
   });
 }
 
-export function checkRonWin(game, seat, discarderSeat, tile) {
+// isChankan: this is a robbing-the-kan ron against the tile just added
+// by declareShouminkan (spec section 27), not an ordinary discard ron.
+export function checkRonWin(game, seat, discarderSeat, tile, { isChankan = false } = {}) {
   const player = game.players[seat];
   if (player.furiten) return { canWin: false, reason: 'furiten' };
   const concealedTiles = [...player.hand, tile];
-  return evaluateWin(game, seat, { concealedTiles, isTsumo: false, winTile: tile, discarderSeat });
+  return evaluateWin(game, seat, { concealedTiles, isTsumo: false, winTile: tile, discarderSeat, isChankan });
 }
 
-function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSeat, isFirstUninterruptedDraw = false }) {
+function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSeat, isFirstUninterruptedDraw = false, isRinshan = false, isChankan = false }) {
   const player = game.players[seat];
   const meldCount = player.melds.length;
   if (!isComplete(concealedTiles, meldCount)) return { canWin: false, reason: 'not_complete' };
@@ -205,8 +311,8 @@ function evaluateWin(game, seat, { concealedTiles, isTsumo, winTile, discarderSe
     riichi: player.riichi,
     isHaitei: isTsumo && game.wall.liveWall.length === 0,
     isHoutei: !isTsumo && game.wall.liveWall.length === 0,
-    isChankan: false,
-    isRinshan: false,
+    isChankan,
+    isRinshan,
     waitIsTwoSided: true,
     ruleConfig: game.ruleConfig,
   };
