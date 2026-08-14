@@ -448,4 +448,40 @@ describe('TurnEngine', () => {
     expect(result.chipResult.alreadyPaid).toBe(1);
     expect(game.chip[1]).toBeGreaterThan(1 + springChips); // more than just the immediate base
   });
+
+  it('pays kinsei chips zero-sum from both opponents on a junme-8 tsumo win', () => {
+    const game = makeGame();
+    game.round.totalDraws = 22; // junme = ceil(22/3) = 8
+    game.players[1].hand = tanyaoTiles();
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.specialBonus.name).toBe('kinsei');
+    expect(game.chip).toEqual([-3, 6, -3]);
+  });
+
+  it('pays daikinsei chips only from the discarder on a junme-16 ron win', () => {
+    const game = makeGame();
+    game.round.totalDraws = 46; // junme = ceil(46/3) = 16
+    const hand13 = tanyaoTiles().slice(0, 13);
+    game.players[1].hand = hand13;
+    const winTile = tanyaoTiles()[13];
+
+    const win = checkRonWin(game, 1, 2, winTile);
+    const result = resolveWin(game, win);
+    expect(result.specialBonus.name).toBe('daikinsei');
+    expect(game.chip).toEqual([0, 5, -5]);
+  });
+
+  it('does not pay kinsei/daikinsei on any other junme', () => {
+    const game = makeGame();
+    game.round.totalDraws = 10; // junme = 4
+    game.players[1].hand = tanyaoTiles();
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.specialBonus.name).toBeNull();
+    expect(game.chip[0]).toBe(0);
+    expect(game.chip[2]).toBe(0);
+  });
 });

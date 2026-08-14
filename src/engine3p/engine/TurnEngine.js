@@ -18,6 +18,7 @@ import { computeFu, computeBasePoints, computeWinPayments, applyHonba, resolveNo
 import { computeDoraHan } from '../scoring/DoraHan.js';
 import { computeSpringChips, getActiveSeasons, computeAutumnBonusHan, applySummerRankUp } from '../scoring/SeasonEffects.js';
 import { computeChips } from '../chips/ChipEngine.js';
+import { computeJunme, computeSpecialBonusPayments } from '../chips/SpecialBonusRule.js';
 import { applyScoreDelta, applyChipDelta } from '../state/ScoreState.js';
 import { markHakuPotchiIfDrawn } from '../state/WhitePotchiState.js';
 
@@ -457,7 +458,21 @@ export function resolveWin(game, winCheck) {
     isCountedYakuman,
     summerActive: activeSeasons.has(2),
   }, game.ruleConfig);
-  game.chip = applyChipDelta(game.chip, [seat === 0 ? chipResult.total : 0, seat === 1 ? chipResult.total : 0, seat === 2 ? chipResult.total : 0]);
+
+  // 金星・大金星 (spec section 33-34): a zero-sum transfer from the
+  // payer(s), separate from chipResult's winner-only categories, so it
+  // needs its own multi-seat delta rather than a single winner credit.
+  const specialBonus = computeSpecialBonusPayments({
+    junme: computeJunme(game.round.totalDraws),
+    isTsumo,
+    winnerSeat: seat,
+    discarderSeat,
+    ruleConfig: game.ruleConfig,
+    multiplier: chipResult.multiplier,
+  });
+  const winnerOnlyDeltas = [0, 0, 0];
+  winnerOnlyDeltas[seat] = chipResult.total;
+  game.chip = applyChipDelta(game.chip, winnerOnlyDeltas.map((d, i) => d + specialBonus.deltas[i]));
 
   return {
     fu,
@@ -465,6 +480,7 @@ export function resolveWin(game, winCheck) {
     base,
     scoreDeltas: withHonba,
     chipResult,
+    specialBonus,
     yakuList,
     doraResult,
     activeSeasons,

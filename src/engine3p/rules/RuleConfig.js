@@ -26,6 +26,11 @@ export const DEFAULT_RULE_CONFIG = {
 
   RULE_ALICE_CHIP: 1,
 
+  // 金星・大金星 (spec section 33-34), condition per the user's
+  // clarification: win by tsumo/ron exactly on this junme (turn count).
+  RULE_KINSEI_JUNME: 8,
+  RULE_DAIKINSEI_JUNME: 16,
+
   // Shuba mechanics, per the user's clarification (supersedes the
   // original doc's "35000 points" framing, which conflicted with
   // section 14's "riichi stick is 1000 points"):
