@@ -558,4 +558,31 @@ describe('TurnEngine', () => {
     expect(result.demekin.diceValue).toBeNull();
     expect(result.demekin.deltas).toEqual([0, 0, 0]);
   });
+
+  it('pays tobashi chips when a big tsumo win drops a low-score opponent to or below zero', () => {
+    const game = makeGame();
+    game.score[2] = 1000; // will be wiped out by this win's tsumo payment
+    game.players[1].hand = [
+      t('m', 1), t('m', 1), t('m', 9), t('p', 1), t('p', 9),
+      t('s', 1), t('s', 9), t('z', 1), t('z', 2), t('z', 3),
+      t('z', 4), t('z', 5), t('z', 6), t('z', 7),
+    ]; // kokushi tsumo, non-dealer -> a large enough payment to bust seat 2
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(game.score[2]).toBeLessThanOrEqual(0);
+    expect(result.tobashi.bustedSeats).toEqual([2]);
+    expect(result.tobashi.deltas[2]).toBe(-rules.RULE_CHIP_VALUES.tobashi);
+    expect(result.tobashi.deltas[1]).toBe(rules.RULE_CHIP_VALUES.tobashi);
+  });
+
+  it('does not pay tobashi for a player who was already at or below zero before this win', () => {
+    const game = makeGame();
+    game.score[2] = -500; // already busted from an earlier hand
+    game.players[1].hand = tanyaoTiles();
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.tobashi.bustedSeats).toEqual([]);
+  });
 });

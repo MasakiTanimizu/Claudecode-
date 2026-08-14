@@ -2,11 +2,12 @@
 // has revealed the haku-potchi tile while in riichi, which makes its
 // special effect permanently active for the rest of the hand.
 //
-// The exact scoring value of a haku-potchi win ("チューリップとして扱う",
-// "即白ポッチは出目金の対象") is not specified precisely enough to
-// implement safely yet — this module only tracks the structural
-// reveal/active state; the win-value hook is a documented TODO for a
-// later phase, the same pattern used for Alice/Shuba in Phase 1.
+// The user has explicitly shelved the "チューリップとして扱う" win-value
+// rule for now (revealedBySeat/activeBySeat exist for whenever that
+// rule comes back, but nothing currently reads activeBySeat for
+// scoring). immediateBySeat ("即白ポッチ") stays live and in use — it's
+// one of DemekinRule's four trigger conditions (spec section 35),
+// independent of the shelved tulip mechanic.
 
 export function createWhitePotchiState(playerCount = 3) {
   return {

@@ -22,6 +22,7 @@ import { distributeZeroSumChips } from '../chips/ChipPayment.js';
 import { computeJunme, computeSpecialBonusPayments } from '../chips/SpecialBonusRule.js';
 import { isDemekinTriggered, computeDemekinPayment } from '../chips/DemekinRule.js';
 import { rollDice } from '../chips/DiceEngine.js';
+import { computeTobashiPayments } from '../chips/TobashiRule.js';
 import { applyScoreDelta, applyChipDelta } from '../state/ScoreState.js';
 import { markHakuPotchiIfDrawn } from '../state/WhitePotchiState.js';
 
@@ -442,6 +443,7 @@ export function resolveWin(game, winCheck) {
     ruleConfig: game.ruleConfig,
   });
 
+  const scoresBeforeWin = [...game.score];
   game.score = applyScoreDelta(game.score, withHonba);
   // Everything sitting in the kyoutaku pot (riichi sticks, and any
   // shubante all-in deposits) goes to the winner.
@@ -502,7 +504,22 @@ export function resolveWin(game, winCheck) {
     demekin = { ...payment, diceValue };
   }
 
-  game.chip = applyChipDelta(game.chip, chipDeltas.map((d, i) => d + specialBonus.deltas[i] + demekin.deltas[i]));
+  // トバし (spec section 32/35): a >0 -> <=0 transition caused by this
+  // win's score/honba/kyoutaku settlement (checked against the score
+  // snapshotted just before it, so an already-busted player from an
+  // earlier hand isn't re-charged for losing further points here).
+  const tobashi = computeTobashiPayments({
+    scoresBefore: scoresBeforeWin,
+    scoresAfter: game.score,
+    winnerSeat: seat,
+    ruleConfig: game.ruleConfig,
+    multiplier: chipResult.multiplier,
+  });
+
+  game.chip = applyChipDelta(
+    game.chip,
+    chipDeltas.map((d, i) => d + specialBonus.deltas[i] + demekin.deltas[i] + tobashi.deltas[i]),
+  );
 
   return {
     fu,
@@ -512,6 +529,7 @@ export function resolveWin(game, winCheck) {
     chipResult,
     specialBonus,
     demekin,
+    tobashi,
     yakuList,
     doraResult,
     activeSeasons,
