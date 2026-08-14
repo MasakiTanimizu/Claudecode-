@@ -20,6 +20,8 @@ import { computeSpringChips, getActiveSeasons, computeAutumnBonusHan, applySumme
 import { computeChips } from '../chips/ChipEngine.js';
 import { distributeZeroSumChips } from '../chips/ChipPayment.js';
 import { computeJunme, computeSpecialBonusPayments } from '../chips/SpecialBonusRule.js';
+import { isDemekinTriggered, computeDemekinPayment } from '../chips/DemekinRule.js';
+import { rollDice } from '../chips/DiceEngine.js';
 import { applyScoreDelta, applyChipDelta } from '../state/ScoreState.js';
 import { markHakuPotchiIfDrawn } from '../state/WhitePotchiState.js';
 
@@ -481,7 +483,26 @@ export function resolveWin(game, winCheck) {
     ruleConfig: game.ruleConfig,
     multiplier: chipResult.multiplier,
   });
-  game.chip = applyChipDelta(game.chip, chipDeltas.map((d, i) => d + specialBonus.deltas[i]));
+
+  // 出目金 (spec section 35): dice-roll chip payment, additional to the
+  // categories above, on the same win. One roll even if multiple
+  // trigger conditions happen to hold simultaneously.
+  const demekinTriggered = isDemekinTriggered({
+    isPureYakuman,
+    fourFlowers: player.flowerTiles.length >= game.ruleConfig.RULE_FLOWER_COUNT,
+    fourKita: player.kitaTiles.length >= game.ruleConfig.RULE_NORTH_COUNT,
+    isImmediateHakuPotchi: game.whitePotchi.immediateBySeat[seat],
+  });
+  let demekin = { deltas: [0, 0, 0], diceValue: null };
+  if (demekinTriggered) {
+    const diceValue = rollDice();
+    const payment = computeDemekinPayment({
+      diceValue, isTsumo, winnerSeat: seat, discarderSeat, multiplier: chipResult.multiplier,
+    });
+    demekin = { ...payment, diceValue };
+  }
+
+  game.chip = applyChipDelta(game.chip, chipDeltas.map((d, i) => d + specialBonus.deltas[i] + demekin.deltas[i]));
 
   return {
     fu,
@@ -490,6 +511,7 @@ export function resolveWin(game, winCheck) {
     scoreDeltas: withHonba,
     chipResult,
     specialBonus,
+    demekin,
     yakuList,
     doraResult,
     activeSeasons,

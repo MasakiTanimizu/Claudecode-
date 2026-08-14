@@ -521,4 +521,41 @@ describe('TurnEngine', () => {
     // Tsumo: each opponent pays the full 3, winner receives 3+3=6.
     expect(game.chip).toEqual([-3, 6, -3]);
   });
+
+  it('triggers demekin (dice-roll chips) on a pure yakuman win, paid zero-sum on top of the yakuman chips', () => {
+    const game = makeGame();
+    game.players[1].hand = [
+      t('m', 1), t('m', 1), t('m', 9), t('p', 1), t('p', 9),
+      t('s', 1), t('s', 9), t('z', 1), t('z', 2), t('z', 3),
+      t('z', 4), t('z', 5), t('z', 6), t('z', 7),
+    ];
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.demekin.diceValue).toBeGreaterThanOrEqual(1);
+    expect(result.demekin.diceValue).toBeLessThanOrEqual(6);
+    // Each opponent pays the dice value on top of the yakuman chips.
+    const yakumanChips = rules.RULE_CHIP_VALUES.pureYakuman;
+    expect(game.chip[1]).toBe((yakumanChips + result.demekin.diceValue) * 2);
+  });
+
+  it('triggers demekin for holding all 4 kita, even without a yakuman', () => {
+    const game = makeGame();
+    game.players[1].hand = tanyaoTiles();
+    game.players[1].kitaTiles = [t('z', 4), t('z', 4), t('z', 4), t('z', 4)];
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.demekin.diceValue).not.toBeNull();
+  });
+
+  it('does not trigger demekin on an ordinary win with none of the 4 conditions', () => {
+    const game = makeGame();
+    game.players[1].hand = tanyaoTiles();
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.demekin.diceValue).toBeNull();
+    expect(result.demekin.deltas).toEqual([0, 0, 0]);
+  });
 });
