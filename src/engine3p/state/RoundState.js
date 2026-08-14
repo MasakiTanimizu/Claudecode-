@@ -22,6 +22,11 @@ export function createRoundState({ roundWind = 1, roundNumber = 1, dealerSeat = 
     anyCallMade: false,
     firstDrawDoneBySeat: Array.from({ length: playerCount }, () => false),
     lastDrawWasFirstUninterrupted: false,
+    // junme (turn count) tracking for 金星・大金星 — this must be the
+    // discard count, not the draw count: a pon/daiminkan caller discards
+    // immediately without drawing from the wall, so totalDraws alone
+    // would under-count how far the hand has actually progressed.
+    totalDiscards: 0,
   };
 }
 
@@ -51,5 +56,6 @@ export function nextRound(round, { dealerContinues, dealerSeat }) {
     anyCallMade: false,
     firstDrawDoneBySeat: round.firstDrawDoneBySeat.map(() => false),
     lastDrawWasFirstUninterrupted: false,
+    totalDiscards: 0,
   };
 }

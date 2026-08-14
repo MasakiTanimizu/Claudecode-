@@ -5,25 +5,23 @@ import { createRuleConfig } from '../rules/RuleConfig.js';
 const rules = createRuleConfig();
 
 describe('SpecialBonusRule.computeJunme', () => {
-  it('is 0 before any draws', () => {
+  it('is 0 before any discards', () => {
     expect(computeJunme(0)).toBe(0);
   });
 
-  it('rounds up to the next full go-around', () => {
+  it('rounds up to the next full go-around, counting discards not draws', () => {
+    // A pon/daiminkan caller discards immediately without drawing from
+    // the wall, so this must be fed RoundState.totalDiscards (every
+    // discard, call-driven or not) — not totalDraws, which a call
+    // skips for the caller and would under-count junme by exactly the
+    // number of calls made so far. See TurnEngine.test.js for an
+    // end-to-end demonstration with an actual pon in the mix.
     expect(computeJunme(1)).toBe(1);
     expect(computeJunme(3)).toBe(1);
     expect(computeJunme(4)).toBe(2);
     expect(computeJunme(22)).toBe(8);
     expect(computeJunme(24)).toBe(8);
     expect(computeJunme(25)).toBe(9);
-  });
-
-  it('is unaffected by pon/kan turn skips, since it only counts live-wall draws', () => {
-    // Simulates: 7 normal draws happened, then a pon skipped a turn
-    // (no draw), then normal draws resumed — totalDraws simply doesn't
-    // increment during the skipped turn, so junme progresses purely
-    // off actual wall consumption regardless of whose turn it "should" be.
-    expect(computeJunme(22)).toBe(computeJunme(22)); // sanity: pure function of totalDraws
   });
 });
 

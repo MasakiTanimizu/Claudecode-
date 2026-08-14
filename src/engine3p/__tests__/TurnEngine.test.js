@@ -451,7 +451,7 @@ describe('TurnEngine', () => {
 
   it('pays kinsei chips zero-sum from both opponents on a junme-8 tsumo win', () => {
     const game = makeGame();
-    game.round.totalDraws = 22; // junme = ceil(22/3) = 8
+    game.round.totalDiscards = 22; // junme = ceil(22/3) = 8
     game.players[1].hand = tanyaoTiles();
 
     const win = checkTsumoWin(game, 1);
@@ -462,7 +462,7 @@ describe('TurnEngine', () => {
 
   it('pays daikinsei chips only from the discarder on a junme-16 ron win', () => {
     const game = makeGame();
-    game.round.totalDraws = 46; // junme = ceil(46/3) = 16
+    game.round.totalDiscards = 46; // junme = ceil(46/3) = 16
     const hand13 = tanyaoTiles().slice(0, 13);
     game.players[1].hand = hand13;
     const winTile = tanyaoTiles()[13];
@@ -473,9 +473,29 @@ describe('TurnEngine', () => {
     expect(game.chip).toEqual([0, 5, -5]);
   });
 
+  it('junme advances by discard count, not draw count, so a pon-caller\'s free discard still counts', () => {
+    const game = makeGame({ liveWall: [t('p', 9)] });
+    // 21 ordinary discards have happened (junme 7). A pon call lets the
+    // caller discard without drawing from the wall — this 22nd discard
+    // must still land in junme 8 (ceil(22/3) = 8), even though it
+    // wasn't preceded by a drawForTurn.
+    game.round.totalDiscards = 21;
+    const p9a = t('p', 9);
+    const p9b = t('p', 9);
+    game.players[0].hand = [p9a, p9b];
+    game.players[2].discards = [t('p', 9)];
+    declarePon(game, 0, 2, [p9a.id, p9b.id]); // caller discards next without drawing
+
+    const followUpTile = t('m', 1);
+    game.players[0].hand = [followUpTile];
+    discardTile(game, 0, followUpTile.id);
+
+    expect(game.round.totalDiscards).toBe(22);
+  });
+
   it('does not pay kinsei/daikinsei on any other junme', () => {
     const game = makeGame();
-    game.round.totalDraws = 10; // junme = 4
+    game.round.totalDiscards = 10; // junme = 4
     game.players[1].hand = tanyaoTiles();
 
     const win = checkTsumoWin(game, 1);
@@ -483,5 +503,22 @@ describe('TurnEngine', () => {
     expect(result.specialBonus.name).toBeNull();
     expect(game.chip[0]).toBe(0);
     expect(game.chip[2]).toBe(0);
+  });
+
+  it('pays ordinary chip categories (e.g. red tiles) zero-sum from opponents too, not from a pool', () => {
+    const game = makeGame();
+    game.players[1].hand = [
+      t('p', 2), t('p', 3), t('p', 4),
+      t('p', 4), t('p', 5, 'red'), t('p', 6),
+      t('s', 6), t('s', 7), t('s', 8),
+      t('s', 3), t('s', 4), t('s', 5),
+      t('p', 2), t('p', 2),
+    ];
+
+    const win = checkTsumoWin(game, 1);
+    const result = resolveWin(game, win);
+    expect(result.chipResult.total).toBe(3); // 1 red tile = 3 chips (ron-equivalent baseline)
+    // Tsumo: each opponent pays the full 3, winner receives 3+3=6.
+    expect(game.chip).toEqual([-3, 6, -3]);
   });
 });

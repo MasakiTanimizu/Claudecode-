@@ -7,8 +7,18 @@
 // tiers, doubled when 夏 is active), hana chips, and the シュバ/
 // シュバゾーマ/シュバンテ multiplier (applied to everything above,
 // per the user's clarification that it covers 和了り祝儀・華牌祝儀・
-// トビ). Alice, 金星/大金星/トリプル, 出目金, and 4花4北 are still
+// トビ). 金星/大金星 live in SpecialBonusRule.js instead (their own
+// junme-based condition). Alice, トリプル, 出目金, and 4花4北 are still
 // later-phase hooks that return 0 until their own engines exist.
+//
+// The returned `total` is the ron-equivalent/per-payer amount, not a
+// flat credit to the winner — per the user's confirmation, every chip
+// category here is a zero-sum transfer from the loser(s), matching
+// 金星/大金星's settlement. The actual multi-seat distribution (tsumo:
+// each opponent pays `total` in full; ron: only the discarder pays)
+// happens in TurnEngine.resolveWin via ChipPayment.distributeZeroSumChips,
+// not in this function — computeChips only needs to know the winning
+// hand, not who's sitting where.
 //
 // Hana chips need special handling: they're paid out immediately at
 // extraction time (spec section 29, before anyone knows if a shuba

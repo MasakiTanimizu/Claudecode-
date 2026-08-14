@@ -1,27 +1,28 @@
 // SpecialBonusRule: 金星・大金星 (spec sections 33-34), implemented as
 // its own module per the spec's own instruction ("SpecialBonusRuleとして
-//独立実装する"). Condition per the user's clarification:
+// 独立実装する"). Condition per the user's clarification:
 //
 //   金星: tsumo/ron win exactly on junme 8. Tsumo pays 3 chips from
 //         each opponent (6 total); ron pays 3 chips from the discarder.
 //   大金星: same shape, junme 16, 5 chips per payer instead of 3.
 //
-// Unlike the other chip categories implemented so far (red, ippatsu,
-// uradora, kita, yakuman — all credited to the winner from an abstract
-// pool), kinsei/daikinsei are an explicit zero-sum transfer: the
-// user described ron as "obtaining 3 FROM the discarder", so the
-// payer(s) actually lose chips, not just the winner gaining them.
-//
-// junme (turn count) is derived from RoundState.totalDraws, which only
-// advances on genuine live-wall draws (TurnEngine.drawForTurn) — kan/
-// kita/hana replacement draws use drawReplacement instead and don't
-// touch it. That's what makes it survive pon/kan skipping the normal
-// turn order, per the user's note ("ポン、カンにより流れてもじゅんめは
-// 適用される") — junme tracks wall depth, not whose turn it "should" be.
+// junme (turn count) is derived from RoundState.totalDiscards — the
+// *discard* count, not the draw count. A pon/daiminkan caller discards
+// immediately without drawing from the wall, so a wall-draw-based
+// counter would silently fall behind whenever a call happens. Counting
+// discards instead means every discard — whether it followed a normal
+// draw or a call — advances junme, which is what the user meant by
+// "捨てる牌の場所" (it's about the discard's position): if the tile
+// sitting at the junme-8 slot gets swept up by a pon, the caller's very
+// next discard is simply the next discard in sequence and still lands
+// on (or past) that same junme value, rather than the count jumping or
+// stalling because no wall tile was drawn for that turn.
 
-export function computeJunme(totalDraws, playerCount = 3) {
-  if (totalDraws <= 0) return 0;
-  return Math.ceil(totalDraws / playerCount);
+import { distributeZeroSumChips } from './ChipPayment.js';
+
+export function computeJunme(totalDiscards, playerCount = 3) {
+  if (totalDiscards <= 0) return 0;
+  return Math.ceil(totalDiscards / playerCount);
 }
 
 // multiplier: the active シュバ/シュバゾーマ/シュバンテ multiplier (1 if
@@ -36,8 +37,6 @@ export function computeSpecialBonusPayments({
   ruleConfig,
   multiplier = 1,
 }) {
-  const deltas = Array.from({ length: seatCount }, () => 0);
-
   let name = null;
   let perPayer = 0;
   if (junme === ruleConfig.RULE_KINSEI_JUNME) {
@@ -47,21 +46,11 @@ export function computeSpecialBonusPayments({
     name = 'daikinsei';
     perPayer = ruleConfig.RULE_CHIP_VALUES.daikinsei;
   } else {
-    return { deltas, name: null, total: 0 };
+    return { deltas: Array.from({ length: seatCount }, () => 0), name: null, total: 0 };
   }
 
-  const scaledPerPayer = perPayer * multiplier;
-
-  if (isTsumo) {
-    for (let s = 0; s < seatCount; s++) {
-      if (s === winnerSeat) continue;
-      deltas[s] -= scaledPerPayer;
-      deltas[winnerSeat] += scaledPerPayer;
-    }
-  } else {
-    deltas[discarderSeat] -= scaledPerPayer;
-    deltas[winnerSeat] += scaledPerPayer;
-  }
-
-  return { deltas, name, total: deltas[winnerSeat] };
+  const { deltas, total } = distributeZeroSumChips(perPayer * multiplier, {
+    isTsumo, winnerSeat, discarderSeat, seatCount,
+  });
+  return { deltas, name, total };
 }

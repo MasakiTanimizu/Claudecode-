@@ -18,6 +18,7 @@ import { computeFu, computeBasePoints, computeWinPayments, applyHonba, resolveNo
 import { computeDoraHan } from '../scoring/DoraHan.js';
 import { computeSpringChips, getActiveSeasons, computeAutumnBonusHan, applySummerRankUp } from '../scoring/SeasonEffects.js';
 import { computeChips } from '../chips/ChipEngine.js';
+import { distributeZeroSumChips } from '../chips/ChipPayment.js';
 import { computeJunme, computeSpecialBonusPayments } from '../chips/SpecialBonusRule.js';
 import { applyScoreDelta, applyChipDelta } from '../state/ScoreState.js';
 import { markHakuPotchiIfDrawn } from '../state/WhitePotchiState.js';
@@ -56,6 +57,7 @@ export function discardTile(game, seat, tileId) {
   if (idx === -1) throw new Error(`Tile ${tileId} not in seat ${seat}'s hand`);
   const [tile] = player.hand.splice(idx, 1);
   player.discards.push(tile);
+  game.round.totalDiscards += 1;
 
   // Furiten: a player is furiten if any of their own discards would
   // complete their current hand.
@@ -459,20 +461,27 @@ export function resolveWin(game, winCheck) {
     summerActive: activeSeasons.has(2),
   }, game.ruleConfig);
 
-  // 金星・大金星 (spec section 33-34): a zero-sum transfer from the
-  // payer(s), separate from chipResult's winner-only categories, so it
-  // needs its own multi-seat delta rather than a single winner credit.
+  // Every chip category is a zero-sum transfer from the loser(s), not a
+  // pool credit (per the user's confirmation): tsumo collects
+  // chipResult.total from *each* opponent, ron collects it from the
+  // discarder alone — same settlement pattern as 金星・大金星 below,
+  // via the shared distributeZeroSumChips helper.
+  const chipDeltas = distributeZeroSumChips(chipResult.total, {
+    isTsumo, winnerSeat: seat, discarderSeat, seatCount: 3,
+  }).deltas;
+
+  // 金星・大金星 (spec section 33-34): its own condition (junme-based)
+  // and its own perPayer amount, so it needs a separate settlement on
+  // top of chipDeltas rather than folding into chipResult itself.
   const specialBonus = computeSpecialBonusPayments({
-    junme: computeJunme(game.round.totalDraws),
+    junme: computeJunme(game.round.totalDiscards),
     isTsumo,
     winnerSeat: seat,
     discarderSeat,
     ruleConfig: game.ruleConfig,
     multiplier: chipResult.multiplier,
   });
-  const winnerOnlyDeltas = [0, 0, 0];
-  winnerOnlyDeltas[seat] = chipResult.total;
-  game.chip = applyChipDelta(game.chip, winnerOnlyDeltas.map((d, i) => d + specialBonus.deltas[i]));
+  game.chip = applyChipDelta(game.chip, chipDeltas.map((d, i) => d + specialBonus.deltas[i]));
 
   return {
     fu,
