@@ -8,6 +8,10 @@ export const DEFAULT_RULE_CONFIG = {
   RULE_FLOWER_COUNT: 4,
   RULE_DORA_DISPLAY_COUNT: 2,
   RULE_DEAD_WALL_SIZE: 14,
+  // Kan-dora (per the user's confirmation): each kan reveals one more
+  // dora indicator on top of the initial RULE_DORA_DISPLAY_COUNT, up to
+  // this many additional reveals per hand (standard real-mahjong cap).
+  RULE_MAX_KAN_DORA: 4,
 
   RULE_HONBA_RON: 2000,
   RULE_HONBA_TSUMO: 1000,
@@ -18,6 +22,11 @@ export const DEFAULT_RULE_CONFIG = {
 
   RULE_OPEN_RIICHI_HAN: 2,
   RULE_FURO_RIICHI_HAN: 0,
+
+  // リーのみ (spec section 22, per user clarification): a win whose
+  // only yaku is 立直 itself scores a fixed 5倍満 (5x the mangan-tier
+  // base of 2000) regardless of actual han/fu.
+  RULE_RIICHI_ONLY_BASE: 10000,
 
   // House rule: chi is removed entirely. Pon and kan (open/daiminkan)
   // share equal call priority; ron always outranks both.

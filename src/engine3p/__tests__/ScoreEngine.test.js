@@ -102,6 +102,55 @@ describe('ScoreEngine.computeWinPayments', () => {
     }).total;
     expect(total).toBeGreaterThanOrEqual(ronTotal);
   });
+
+  describe('mangan-and-up fixed table (base >= 2000)', () => {
+    it('pays a non-dealer (child) yakuman ron 32000, matching the real 3-player table', () => {
+      const { deltas, total } = computeWinPayments({
+        forcedBase: 8000, isDealer: false, isTsumo: false, winnerSeat: 1, discarderSeat: 2,
+      });
+      expect(total).toBe(32000);
+      expect(deltas).toEqual([0, 32000, -32000]);
+    });
+
+    it('splits a non-dealer (child) yakuman tsumo as 12000 (other) / 20000 (dealer)', () => {
+      const { deltas, total } = computeWinPayments({
+        forcedBase: 8000, isDealer: false, isTsumo: true, winnerSeat: 1, dealerSeat: 0,
+      });
+      expect(total).toBe(32000);
+      expect(deltas).toEqual([-20000, 32000, -12000]);
+    });
+
+    it('pays a dealer yakuman ron 48000', () => {
+      const { deltas, total } = computeWinPayments({
+        forcedBase: 8000, isDealer: true, isTsumo: false, winnerSeat: 0, discarderSeat: 2,
+      });
+      expect(total).toBe(48000);
+      expect(deltas).toEqual([48000, 0, -48000]);
+    });
+
+    it('splits a dealer yakuman tsumo evenly as 24000 all', () => {
+      const { deltas, total } = computeWinPayments({
+        forcedBase: 8000, isDealer: true, isTsumo: true, winnerSeat: 0, dealerSeat: 0,
+      });
+      expect(total).toBe(48000);
+      expect(deltas).toEqual([48000, -24000, -24000]);
+    });
+
+    it('scales linearly for other mangan+ tiers (mangan, haneman, baiman, sanbaiman)', () => {
+      const child_ron = (base) => computeWinPayments({ forcedBase: base, isDealer: false, isTsumo: false, winnerSeat: 1, discarderSeat: 0 }).total;
+      expect(child_ron(2000)).toBe(8000); // mangan
+      expect(child_ron(3000)).toBe(12000); // haneman
+      expect(child_ron(4000)).toBe(16000); // baiman
+      expect(child_ron(6000)).toBe(24000); // sanbaiman
+    });
+
+    it('scales up further for the summer-boosted 5-baiman tier (base 40000, multiplier 20)', () => {
+      const { total } = computeWinPayments({
+        forcedBase: 40000, isDealer: false, isTsumo: false, winnerSeat: 1, discarderSeat: 0,
+      });
+      expect(total).toBe(160000); // 8000 (child ron unit) * (40000/2000)
+    });
+  });
 });
 
 describe('ScoreEngine.applyHonba', () => {

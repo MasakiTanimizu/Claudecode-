@@ -44,7 +44,13 @@ function makeGame({ liveWall = [] } = {}) {
     chip: createChipState(3),
     wall: {
       liveWall,
-      deadWall: { doraIndicators: [], uraDoraIndicators: [], replacementPool: [t('p', 9)] },
+      deadWall: {
+        doraIndicators: [],
+        uraDoraIndicators: [],
+        kanDoraPool: [t('p', 4), t('p', 5), t('p', 6), t('p', 7)],
+        kanUraDoraPool: [t('s', 4), t('s', 5), t('s', 6), t('s', 7)],
+        replacementPool: [t('p', 9)],
+      },
     },
     flower: createFlowerState(3),
     whitePotchi: createWhitePotchiState(3),
@@ -217,12 +223,17 @@ describe('TurnEngine', () => {
     expect(win.canWin).toBe(true);
     expect(win.isYakuman).toBe(true);
 
+    const before = [...game.score];
     const result = resolveWin(game, win);
     expect(result.isYakuman).toBe(true);
     expect(result.han).toBe(13);
     expect(result.base).toBe(8000);
     expect(result.yakuList.map((y) => y.name)).toContain('国士無双');
     expect(result.chipResult.breakdown.find((b) => b.name === 'yakuman').chips).toBe(rules.RULE_CHIP_VALUES.pureYakuman);
+    // Real 3-player yakuman table: non-dealer tsumo = 12000 (other child) + 20000 (dealer).
+    expect(game.score[0]).toBe(before[0] - 20000);
+    expect(game.score[2]).toBe(before[2] - 12000);
+    expect(game.score[1]).toBe(before[1] + 32000);
   });
 
   it('rejects a "complete" hand that uses north outside kokushi/tsuuiisou/shousuushii/daisuushii', () => {
@@ -584,5 +595,94 @@ describe('TurnEngine', () => {
     const win = checkTsumoWin(game, 1);
     const result = resolveWin(game, win);
     expect(result.tobashi.bustedSeats).toEqual([]);
+  });
+
+  it('scores リーのみ (riichi as the sole yaku) as a fixed 5-baiman, regardless of actual han/fu', () => {
+    const game = makeGame({ liveWall: [t('s', 1)] }); // avoid houtei from an empty live wall
+    game.players[1].hand = [
+      t('p', 1), t('p', 2), t('p', 3),
+      t('p', 4), t('p', 5), t('p', 6),
+      t('s', 7), t('s', 8), t('s', 9),
+      t('m', 1), t('m', 1),
+      t('p', 8), t('p', 8),
+    ];
+    game.players[1].riichi.active = true;
+
+    const winTile = t('m', 1); // ron completes the 111m triplet — no tanyao/pinfu/yakuhai
+    const win = checkRonWin(game, 1, 0, winTile);
+    expect(win.canWin).toBe(true);
+    expect(win.yakuResult.yakuList).toEqual([{ name: '立直', han: 1 }]);
+
+    const before = [...game.score];
+    const result = resolveWin(game, win);
+    expect(result.base).toBe(rules.RULE_RIICHI_ONLY_BASE);
+    // Non-dealer ron at the mangan-unit table, multiplier 5: 8000 * 5 = 40000.
+    expect(game.score[1]).toBe(before[1] + 40000);
+    expect(game.score[0]).toBe(before[0] - 40000);
+  });
+
+  it('does not treat a riichi + menzen-tsumo win as リーのみ (more than one yaku present)', () => {
+    const game = makeGame({ liveWall: [t('s', 1)] }); // avoid haitei from an empty live wall
+    game.players[1].hand = [
+      t('p', 1), t('p', 2), t('p', 3),
+      t('p', 4), t('p', 5), t('p', 6),
+      t('s', 7), t('s', 8), t('s', 9),
+      t('m', 1), t('m', 1), t('m', 1),
+      t('p', 8), t('p', 8),
+    ];
+    game.players[1].riichi.active = true;
+
+    const win = checkTsumoWin(game, 1);
+    expect(win.yakuResult.yakuList.map((y) => y.name).sort()).toEqual(['立直', '門前自摸'].sort());
+    const result = resolveWin(game, win);
+    expect(result.base).not.toBe(rules.RULE_RIICHI_ONLY_BASE);
+  });
+
+  it('reveals a kan-dora and a matching kan-uradora indicator on every kan', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    const doraBefore = game.round.doraIndicators.length;
+    const uraBefore = game.round.uraDoraIndicators.length;
+    const expectedKanDora = game.wall.deadWall.kanDoraPool[0];
+    const expectedKanUraDora = game.wall.deadWall.kanUraDoraPool[0];
+
+    const tiles = [t('m', 1), t('m', 1), t('m', 1), t('m', 1)];
+    game.players[0].hand = [...tiles];
+    const { kanDora, kanUraDora } = declareAnkan(game, 0, tiles.map((x) => x.id));
+
+    expect(kanDora).toBe(expectedKanDora);
+    expect(kanUraDora).toBe(expectedKanUraDora);
+    expect(game.round.doraIndicators.length).toBe(doraBefore + 1);
+    expect(game.round.doraIndicators).toContain(expectedKanDora);
+    expect(game.round.uraDoraIndicators.length).toBe(uraBefore + 1);
+  });
+
+  it('a revealed kan-dora contributes extra han to a later win, same as the initial dora', () => {
+    const game = makeGame({ liveWall: [t('s', 9), t('s', 9)] });
+    const tiles = [t('m', 1), t('m', 1), t('m', 1), t('m', 1)];
+    game.players[1].hand = [...tiles];
+    // Force the kan-dora indicator to be p6, so its dora is p7.
+    game.wall.deadWall.kanDoraPool = [t('p', 6)];
+    declareAnkan(game, 1, tiles.map((x) => x.id));
+
+    game.players[1].hand = [
+      t('p', 7), t('p', 7), t('p', 7), // 3 kan-dora tiles
+      t('s', 1), t('s', 2), t('s', 3),
+      t('s', 6), t('s', 7), t('s', 8),
+      t('z', 5), t('z', 5),
+    ];
+    const win = checkTsumoWin(game, 1);
+    expect(win.canWin).toBe(true);
+    const result = resolveWin(game, win);
+    expect(result.doraResult.normalDora).toBe(3);
+  });
+
+  it('stops revealing kan-dora once RULE_MAX_KAN_DORA kans have already happened', () => {
+    const game = makeGame({ liveWall: [t('s', 9)] });
+    game.wall.deadWall.kanDoraPool = []; // already exhausted
+    const tiles = [t('m', 1), t('m', 1), t('m', 1), t('m', 1)];
+    game.players[0].hand = [...tiles];
+
+    const { kanDora } = declareAnkan(game, 0, tiles.map((x) => x.id));
+    expect(kanDora).toBeNull();
   });
 });

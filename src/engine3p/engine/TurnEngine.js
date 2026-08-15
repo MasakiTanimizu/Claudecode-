@@ -9,7 +9,7 @@
 // from multiple players, and full reconnect/replay wiring, are Phase 2/6
 // concerns layered on top of these primitives.
 
-import { drawTile as drawFromWall, drawReplacement } from '../wall/Wall.js';
+import { drawTile as drawFromWall, drawReplacement, revealKanDora, revealKanUraDora } from '../wall/Wall.js';
 import { isComplete, isTenpai, getWinningTiles } from '../hand/HandParser.js';
 import { tileKey, isNorth } from '../tiles/Tiles.js';
 import { evaluateYaku } from '../yaku/YakuEngine.js';
@@ -130,6 +130,18 @@ function markReplacementPotchi(game, seat, replacement) {
   });
 }
 
+// Every kan reveals one more dora indicator, and a matching hidden
+// kan-uradora indicator, per the user's kan-dora confirmation. No-op
+// (returns nulls) once RULE_MAX_KAN_DORA kans have already revealed
+// one each this hand.
+function revealKanDoraForGame(game) {
+  const kanDora = revealKanDora(game.wall);
+  if (kanDora) game.round.doraIndicators = [...game.round.doraIndicators, kanDora];
+  const kanUraDora = revealKanUraDora(game.wall);
+  if (kanUraDora) game.round.uraDoraIndicators = [...game.round.uraDoraIndicators, kanUraDora];
+  return { kanDora, kanUraDora };
+}
+
 export function declareKita(game, seat, tileId) {
   const player = game.players[seat];
   const idx = player.hand.findIndex((t) => t.id === tileId && isNorth(t));
@@ -244,7 +256,8 @@ export function declareDaiminkan(game, callerSeat, discarderSeat, handTileIds) {
   if (replacement) caller.hand.push(replacement);
   markReplacementPotchi(game, callerSeat, replacement);
   refreshFuriten(game, callerSeat);
-  return { meld: caller.melds[caller.melds.length - 1], replacement };
+  const { kanDora, kanUraDora } = revealKanDoraForGame(game);
+  return { meld: caller.melds[caller.melds.length - 1], replacement, kanDora, kanUraDora };
 }
 
 // Ankan (暗槓): a concealed kan declared from 4 tiles already in hand,
@@ -262,7 +275,8 @@ export function declareAnkan(game, seat, handTileIds) {
   if (replacement) player.hand.push(replacement);
   markReplacementPotchi(game, seat, replacement);
   refreshFuriten(game, seat);
-  return { meld: player.melds[player.melds.length - 1], replacement };
+  const { kanDora, kanUraDora } = revealKanDoraForGame(game);
+  return { meld: player.melds[player.melds.length - 1], replacement, kanDora, kanUraDora };
 }
 
 // Shouminkan (加槓): upgrades an already-called pon into a kan using the
@@ -286,7 +300,8 @@ export function declareShouminkan(game, seat, tileId) {
   if (replacement) player.hand.push(replacement);
   markReplacementPotchi(game, seat, replacement);
   refreshFuriten(game, seat);
-  return { meld: ponMeld, addedTile: tile, replacement };
+  const { kanDora, kanUraDora } = revealKanDoraForGame(game);
+  return { meld: ponMeld, addedTile: tile, replacement, kanDora, kanUraDora };
 }
 
 export function checkTsumoWin(game, seat, { isRinshan = false } = {}) {
@@ -420,7 +435,18 @@ export function resolveWin(game, winCheck) {
       isChiitoitsu: isChiitoitsuWin,
     });
     han = yakuResult.han + doraResult.total + autumnBonusHan;
-    base = applySummerRankUp(computeBasePoints(fu, han), activeSeasons);
+
+    // リーのみ (spec section 22, per the user's clarification): a win
+    // whose only yaku is 立直 itself (dora doesn't count against this,
+    // only entries in yakuList do) scores a fixed 5倍満 regardless of
+    // the hand's actual han/fu. オープンリーチ/副露リーチ produce a
+    // different yaku name, so they never qualify here — per the user,
+    // "オープンのみ" isn't a separate thing, it's just what declaring
+    // riichi with an open hand already means.
+    const isRiichiOnly = yakuResult.yakuList.length === 1 && yakuResult.yakuList[0].name === '立直';
+    base = isRiichiOnly
+      ? applySummerRankUp(game.ruleConfig.RULE_RIICHI_ONLY_BASE, activeSeasons)
+      : applySummerRankUp(computeBasePoints(fu, han), activeSeasons);
     yakuList = yakuResult.yakuList;
   }
   const isCountedYakuman = !isPureYakuman && han >= 13;

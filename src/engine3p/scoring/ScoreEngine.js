@@ -82,6 +82,67 @@ function proportionalRoundedShares(total, weights) {
   return weights.map((w) => roundUp100((total * w) / weightSum));
 }
 
+// Mangan-and-up tier (base >= 2000) uses a FIXED payment table rather
+// than the continuous fu*2^(2+han) formula's weighted-round-up split —
+// this is standard real-mahjong practice (once a hand reaches mangan,
+// players use the memorized table, not the raw formula), and the user
+// confirmed the exact real 3-player numbers for yakuman specifically:
+//   子ロン32000 / 子ツモ 12000(他家)+20000(親) / 親ロン48000 / 親ツモ24000オール
+// These are a clean 4x linear scaling of the mangan-tier (base=2000)
+// unit table below, so the same table is used for every mangan+ tier
+// (mangan/haneman/baiman/sanbaiman/yakuman/5-baiman for リーのみ and
+// 夏-boosted yakuman) via multiplier = base / 2000, not just literal
+// yakuman — the mangan/haneman/baiman/sanbaiman tiers aren't separately
+// confirmed by the user, but this extrapolation is the only one
+// consistent with the given numbers landing exactly on a linear scale.
+const MANGAN_UNIT_CHILD_RON = 8000;
+const MANGAN_UNIT_CHILD_TSUMO_DEALER_SHARE = 5000;
+const MANGAN_UNIT_CHILD_TSUMO_OTHER_SHARE = 3000;
+const MANGAN_UNIT_DEALER_RON = 12000;
+const MANGAN_UNIT_DEALER_TSUMO_EACH = 6000;
+
+function computeManganPlusPayments({ base, isDealer, isTsumo, winnerSeat, dealerSeat, discarderSeat, seatCount }) {
+  const multiplier = base / 2000;
+  const deltas = Array.from({ length: seatCount }, () => 0);
+
+  if (isDealer) {
+    if (!isTsumo) {
+      const total = MANGAN_UNIT_DEALER_RON * multiplier;
+      deltas[winnerSeat] += total;
+      deltas[discarderSeat] -= total;
+      return { deltas, total, base };
+    }
+    const each = MANGAN_UNIT_DEALER_TSUMO_EACH * multiplier;
+    let total = 0;
+    for (let s = 0; s < seatCount; s++) {
+      if (s === winnerSeat) continue;
+      deltas[s] -= each;
+      total += each;
+    }
+    deltas[winnerSeat] += total;
+    return { deltas, total, base };
+  }
+
+  if (!isTsumo) {
+    const total = MANGAN_UNIT_CHILD_RON * multiplier;
+    deltas[winnerSeat] += total;
+    deltas[discarderSeat] -= total;
+    return { deltas, total, base };
+  }
+
+  const dealerShare = MANGAN_UNIT_CHILD_TSUMO_DEALER_SHARE * multiplier;
+  const otherShare = MANGAN_UNIT_CHILD_TSUMO_OTHER_SHARE * multiplier;
+  let total = 0;
+  for (let s = 0; s < seatCount; s++) {
+    if (s === winnerSeat) continue;
+    const share = s === dealerSeat ? dealerShare : otherShare;
+    deltas[s] -= share;
+    total += share;
+  }
+  deltas[winnerSeat] += total;
+  return { deltas, total, base };
+}
+
 export function computeWinPayments({
   fu,
   han,
@@ -94,6 +155,11 @@ export function computeWinPayments({
   forcedBase,
 }) {
   const base = forcedBase ?? computeBasePoints(fu, han);
+
+  if (base >= 2000) {
+    return computeManganPlusPayments({ base, isDealer, isTsumo, winnerSeat, dealerSeat, discarderSeat, seatCount });
+  }
+
   const ronTotal = roundUp100(base * (isDealer ? 6 : 4));
 
   const deltas = Array.from({ length: seatCount }, () => 0);
